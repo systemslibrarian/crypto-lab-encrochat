@@ -31,7 +31,7 @@ describe("End-to-end: encryption sound, endpoint compromised", () => {
     expect(event.verified).toBe(true);
     expect(event.delivered).toBe("the shipment is on the water");
     // The wire an on-path adversary sees is opaque and does not contain the text.
-    expect(event.wire.ciphertextHex).not.toContain(toHex(utf8("the shipment is on the water")));
+    expect(event.wire.packetHex).not.toContain(toHex(utf8("the shipment is on the water")));
     // Yet the implant harvested the plaintext at both endpoints — before encrypt,
     // after decrypt — having never seen a key or a ciphertext.
     const leaked = event.captures.map((c) => c.plaintext);
@@ -58,23 +58,31 @@ describe("The on-path network adversary gets nothing", () => {
     expect(tap.reason).toMatch(/authentication failed/i);
   });
 
-  it("a tampered ciphertext is rejected (integrity, not just secrecy)", async () => {
+  it("forges a real ratchet packet, sees it rejected, and recovers the authentic one", async () => {
     const session = await Session.create();
-    const tamper = await session.tamperAttempt();
-    expect(tamper.rejected).toBe(true);
+    const tamper = await session.tamperAndRecover();
+    expect(tamper.rejected).toBe(true); // forged packet rejected
+    expect(tamper.recovered).toBe(true); // authentic packet still decrypts (no state poisoning)
     expect(tamper.reason).toMatch(/rejected/i);
   });
 });
 
-describe("Verdict separation tracks system integrity, not the raw crypto result", () => {
-  it("sound encryption + clean endpoint = system sound", () => {
-    const v = assessSystem({ encryptionSound: true, endpointCompromised: false });
+describe("Verdict separation is derived from observed evidence, not asserted", () => {
+  it("no messages, no implant = untested / neutral (never green)", () => {
+    const v = assessSystem({ messagesVerified: 0, verificationFailures: 0, endpointCompromised: false });
+    expect(v.encryption).toBe("untested");
+    expect(v.system).toBe("untested");
+    expect(v.systemSignal).toBe("neutral");
+  });
+
+  it("verified messages + clean endpoint = system sound", () => {
+    const v = assessSystem({ messagesVerified: 3, verificationFailures: 0, endpointCompromised: false });
     expect(v).toMatchObject({ encryption: "sound", endpoint: "sound", system: "sound" });
     expect(v.systemSignal).toBe("ok");
   });
 
-  it("sound encryption + compromised endpoint = system COMPROMISED (alarm)", () => {
-    const v = assessSystem({ encryptionSound: true, endpointCompromised: true });
+  it("verified messages + compromised endpoint = system COMPROMISED (alarm)", () => {
+    const v = assessSystem({ messagesVerified: 3, verificationFailures: 0, endpointCompromised: true });
     // Encryption is genuinely sound...
     expect(v.encryption).toBe("sound");
     // ...but the system verdict — the one that matters — is compromised.
@@ -83,8 +91,9 @@ describe("Verdict separation tracks system integrity, not the raw crypto result"
     expect(v.headline).toMatch(/endpoint did not/i);
   });
 
-  it("the weakest link decides: broken encryption is also system-compromised", () => {
-    const v = assessSystem({ encryptionSound: false, endpointCompromised: false });
+  it("the weakest link decides: a verification failure is system-compromised", () => {
+    const v = assessSystem({ messagesVerified: 2, verificationFailures: 1, endpointCompromised: false });
+    expect(v.encryption).toBe("compromised");
     expect(v.system).toBe("compromised");
   });
 });

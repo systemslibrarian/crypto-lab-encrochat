@@ -4,15 +4,24 @@ import { expect, test, type Page } from "@playwright/test";
 /**
  * WCAG 2.1 A/AA gate. Runs against the production `vite preview` build, so what
  * passes here is what ships. Axe only checks what is in the DOM, so we drive
- * EVERY panel into its post-interaction state — the full conversation, the wire,
- * the ratchet strip, the break-it results, the implant capture list, all three
- * verdict states, and every disclosure — before scanning, in both themes.
+ * EVERY panel into its post-interaction state — the full conversation, the
+ * labeled wire packet, the ratchet strip, the break-it results, the implant
+ * capture list, all three verdict states, and every disclosure — before
+ * scanning, in both themes. All app commands are serialized behind an
+ * aria-busy flag, so we wait for each to settle.
  */
 
 const TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
+async function settle(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () => document.getElementById("app")?.getAttribute("aria-busy") !== "true",
+  );
+}
+
 async function driveDemos(page: Page): Promise<void> {
   await page.waitForSelector(".cl-hero-title");
+  await settle(page);
 
   // Neutralize motion so nothing is mid-animation when axe measures contrast.
   await page.addStyleTag({
@@ -21,21 +30,25 @@ async function driveDemos(page: Page): Promise<void> {
 
   // Send the full scripted exchange (button disables itself at the end).
   const sendNext = page.getByRole("button", { name: /send next message/i });
-  for (let i = 0; i < 6; i++) {
-    if (!(await sendNext.isEnabled().catch(() => false))) break;
+  for (let i = 0; i < 4; i++) {
+    if (!(await sendNext.isEnabled())) break;
     await sendNext.click();
+    await settle(page);
   }
 
   // Compose a custom message so the free-text path is exercised too.
   await page.fill("#custom-msg", "custom traffic for the wire");
   await page.getByRole("button", { name: /encrypt & send/i }).click();
+  await settle(page);
 
   // Deploy the endpoint implant, then send again so the capture list populates
   // and the endpoint + system verdicts flip to their ALARM state.
   await page.locator(".switch").click();
+  await settle(page);
   await expect(page.locator(".switch")).toHaveAttribute("aria-pressed", "true");
   await page.fill("#custom-msg", "harvested at the endpoint");
   await page.getByRole("button", { name: /encrypt & send/i }).click();
+  await settle(page);
   await page.waitForSelector(".capture-list li");
 
   // Open every disclosure and run the break-it experiments.
@@ -43,8 +56,9 @@ async function driveDemos(page: Page): Promise<void> {
     document.querySelectorAll("details").forEach((d) => ((d as HTMLDetailsElement).open = true));
   });
   await page.getByRole("button", { name: /tap the wire/i }).click();
-  await page.getByRole("button", { name: /flip a bit/i }).click();
-  await page.waitForTimeout(300);
+  await settle(page);
+  await page.getByRole("button", { name: /forge a packet/i }).click();
+  await settle(page);
 }
 
 async function scan(page: Page): Promise<void> {

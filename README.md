@@ -4,9 +4,10 @@
 
 A browser lab that reconstructs how the Encrochat encrypted messenger was defeated
 in 2020 — not by breaking its cryptography, but by compromising the endpoint. It
-runs a **real Signal-protocol Double Ratchet** exchange, shows that the wire is
-genuinely opaque, then deploys a modelled endpoint implant that reads the plaintext
-the cryptography just protected perfectly. The primitive held. It did not matter.
+runs a **real (in-order) Signal-protocol Double Ratchet** exchange, shows that the
+wire is genuinely opaque, then deploys a modelled endpoint implant that reads the
+plaintext the cryptography just protected perfectly. The primitive held. It did not
+matter.
 
 > **This is a teaching demo, not production cryptography.** It runs real crypto and
 > passes spec known-answer tests, but do not use it to protect real secrets.
@@ -37,15 +38,18 @@ Encrochat"* (eprint 2026/1319). **Not production crypto.**
    right pane is the exact AES-256-GCM bytes an on-path eavesdropper captures. A
    ratchet strip shows a fresh key per message and marks each DH step (`⟳`) versus a
    symmetric-only advance (`chain +1`).
-2. **Break it yourself** — attempt a keyless wiretap of the ciphertext (fails), or flip
-   a single bit and hand it to the real recipient (rejected). The wire has integrity,
-   not just secrecy.
+2. **Break it yourself** — attempt a keyless wiretap of the captured packet (fails), or
+   run an isolated real exchange, flip one ciphertext bit, and watch the recipient
+   reject the forgery **while the authentic packet still decrypts**. Rejection commits
+   no ratchet state: the wire has integrity, not just secrecy.
 3. **The endpoint pivot** — deploy an implant on the devices and send a message. It
    never sees a key and never touches a ciphertext; it reads the plaintext the app
    already holds. The wire and the cipher are unchanged — the plaintext leaks anyway.
-4. **Two verdicts, one that decides** — *Message encryption: SOUND ✓* sits beside
-   *Endpoint integrity: COMPROMISED ✗*. The system banner tracks the weakest link, so
-   sound encryption on a compromised device reads as an alarm, not a success.
+4. **Two verdicts, one that decides** — *Message encryption* and *Endpoint integrity*
+   are independent axes, each derived from observed evidence (tag verifications and
+   whether an implant is deployed), starting neutral rather than green. The system
+   banner tracks the weakest link, so sound encryption on a compromised device reads
+   as an alarm, not a success.
 5. **Why one endpoint compromise scaled to all of them** — the vertically integrated
    stack (device vendor + service provider + PKI) as the real single point of failure.
 
@@ -104,13 +108,18 @@ npm run test:a11y # WCAG 2.1 AA gate (both themes) against the production build
 
 ## Build & Verify
 
-- **30 unit tests** (Vitest), colocated as `src/**/*.test.ts`, run in CI before deploy.
+- **40 unit tests** (Vitest), colocated as `src/**/*.test.ts`, run in CI before deploy.
 - **7 spec known-answer tests** pin the primitives to their standards:
   - `src/crypto/primitives.test.ts` — HMAC-SHA256 (RFC 4231 ×2), HKDF-SHA256
     (RFC 5869 ×2), AES-256-GCM (NIST CAVP vector).
   - `src/crypto/x25519.test.ts` — X25519 (RFC 7748 §5.2 ×2).
 - `src/crypto/double-ratchet.test.ts` covers round-trips across DH ratchet steps,
-  on-wire opacity, fail-closed tamper rejection, and forward secrecy.
+  on-wire opacity, forward secrecy, the canonical wire codec, and the **transactional
+  receive** property: a forged packet is rejected and leaves the ratchet byte-for-byte
+  unchanged, so the next authentic packet still decrypts.
+- `src/session.test.ts` proves **fresh key material every session** — 500 sessions
+  encrypt identical plaintext to 500 distinct packets (no repeated key/IV) — and that
+  verdicts follow observed evidence (untested → sound → alarm).
 - `src/endpoint/implant.test.ts` proves the thesis: encryption sound **and** endpoint
   compromised leaks plaintext, and the system verdict tracks integrity.
 - **Accessibility gate:** `@axe-core/playwright` scans the production build for zero
@@ -118,9 +127,11 @@ npm run test:a11y # WCAG 2.1 AA gate (both themes) against the production build
 
 ## Performance
 
-Everything runs client-side with no backend. The whole exchange — X25519 agreement,
-HKDF/HMAC chains, and AES-GCM per message — completes in single-digit milliseconds
-per message via WebCrypto and `@noble/curves`; the UI never blocks.
+Everything runs client-side with no backend and ships as a small static bundle
+(~13 kB gzipped JS). Each message is a handful of WebCrypto operations plus one
+`@noble/curves` X25519 agreement, and all UI commands are serialized so the page
+never blocks or races. Cold-load and per-message timings are not yet benchmarked in
+CI, so no specific latency figure is claimed here.
 
 ---
 

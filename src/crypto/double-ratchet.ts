@@ -22,6 +22,7 @@
 import {
   aesGcmDecrypt,
   aesGcmEncrypt,
+  bytesEqual,
   concat,
   hkdfSha256,
   hmacSha256,
@@ -76,9 +77,40 @@ function u32(n: number): Uint8Array {
   return b;
 }
 
+function readU32(bytes: Uint8Array, offset: number): number {
+  return new DataView(bytes.buffer, bytes.byteOffset + offset, 4).getUint32(0, false);
+}
+
 /** Serialize a header into the bytes bound as AEAD associated data. */
 export function serializeHeader(header: Header): Uint8Array {
   return concat(ASSOCIATED_DATA, header.dh, u32(header.pn), u32(header.n));
+}
+
+/** Length of the plaintext wire header: dh(32) + pn(4) + n(4). */
+export const WIRE_HEADER_LEN = 40;
+/** AES-GCM authentication tag length. */
+export const GCM_TAG_LEN = 16;
+
+/**
+ * Canonical on-wire encoding — the literal bytes that cross the network:
+ * `dh(32) || pn(4) || n(4) || ciphertext(||16-byte tag)`. This one codec is the
+ * single source of truth for what is displayed, byte-counted, tampered, and
+ * parsed back by the recipient, so the packet shown is the packet tested.
+ */
+export function encodeWire(message: WireMessage): Uint8Array {
+  return concat(message.header.dh, u32(message.header.pn), u32(message.header.n), message.ciphertext);
+}
+
+export function decodeWire(bytes: Uint8Array): WireMessage {
+  if (bytes.length < WIRE_HEADER_LEN + GCM_TAG_LEN) throw new Error("wire packet too short");
+  return {
+    header: {
+      dh: bytes.slice(0, 32),
+      pn: readU32(bytes, 32),
+      n: readU32(bytes, 36),
+    },
+    ciphertext: bytes.slice(WIRE_HEADER_LEN),
+  };
 }
 
 /**
@@ -163,29 +195,44 @@ export async function ratchetEncrypt(
 }
 
 /**
- * Decrypt one wire message, performing a DH step first if the sender has
- * ratcheted forward. Fail-closed: a bad tag (tamper / wrong key) throws.
+ * Decrypt one wire message. TRANSACTIONAL and fail-closed: all state work is
+ * done on a candidate copy, the AEAD tag is verified, and the live `state` is
+ * committed ONLY if authentication succeeds. A forged or tampered packet throws
+ * and leaves the ratchet byte-for-byte unchanged, so the next authentic packet
+ * still decrypts. "Fail closed" here means the invalid input commits nothing.
  *
  * (Skipped-message handling for out-of-order delivery is intentionally omitted;
- * the demo delivers in order. The invariant that matters here — the tag must
- * verify — is fully enforced.)
+ * this is an in-order Double Ratchet teaching subset. The in-order invariant is
+ * enforced without ever mutating state on a rejected packet.)
  */
 export async function ratchetDecrypt(
   state: RatchetState,
   message: WireMessage,
 ): Promise<Uint8Array> {
+  // Candidate state: a shallow copy. Every field is replaced wholesale (never
+  // mutated in place), so the originals in `state` are untouched until commit.
+  const candidate: RatchetState = { ...state };
+
   const sameRemote =
-    state.dhRemote !== null &&
-    state.dhRemote.length === message.header.dh.length &&
-    state.dhRemote.every((b, i) => b === message.header.dh[i]);
+    candidate.dhRemote !== null && bytesEqual(candidate.dhRemote, message.header.dh);
 
-  if (!sameRemote) await dhRatchet(state, message.header);
-  if (!state.chainRecv) throw new Error("receiving chain not initialised");
+  if (!sameRemote) await dhRatchet(candidate, message.header);
+  if (!candidate.chainRecv) throw new Error("receiving chain not initialised");
 
-  const { chainKey, messageKey } = await kdfChainKey(state.chainRecv);
-  state.chainRecv = chainKey;
-  state.recvCount += 1;
-
+  const { chainKey, messageKey } = await kdfChainKey(candidate.chainRecv);
   const { aesKey, iv } = await messageCipherParams(messageKey);
-  return aesGcmDecrypt(aesKey, iv, message.ciphertext, serializeHeader(message.header));
+
+  // Authenticate + decrypt BEFORE committing. Throws on a bad tag — state intact.
+  const plaintext = await aesGcmDecrypt(
+    aesKey,
+    iv,
+    message.ciphertext,
+    serializeHeader(message.header),
+  );
+
+  // Success — commit the advanced receive state.
+  candidate.chainRecv = chainKey;
+  candidate.recvCount += 1;
+  Object.assign(state, candidate);
+  return plaintext;
 }

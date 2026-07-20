@@ -71,16 +71,32 @@ export class Implant {
   }
 }
 
-/** How a lay observer would read one component's status. */
-export type Integrity = "sound" | "compromised";
+/**
+ * A component's status, derived from OBSERVED evidence. `untested` is a real,
+ * distinct state — the absence of a modelled compromise is not proof of safety,
+ * and zero messages is not proof the encryption works.
+ */
+export type Integrity = "sound" | "compromised" | "untested";
 /** The colour/urgency an indicator should carry. */
-export type Signal = "ok" | "alarm";
+export type Signal = "ok" | "alarm" | "neutral";
+
+/** Evidence recorded from what actually happened this session. */
+export interface Evidence {
+  /** Messages whose recipient AEAD tag verified and decrypted. */
+  readonly messagesVerified: number;
+  /** Messages whose authentication failed on the honest delivery path. */
+  readonly verificationFailures: number;
+  /** Is a modelled implant currently deployed on the endpoints? */
+  readonly endpointCompromised: boolean;
+}
 
 export interface SystemVerdict {
-  /** Did the message encryption do its job (all AEAD tags verified, FS intact)? */
+  /** Encryption status from observed tag verifications, not from a send counter. */
   readonly encryption: Integrity;
-  /** Is the device the plaintext lives on trustworthy? */
+  readonly encryptionLabel: string;
+  /** Endpoint status from whether a modelled implant is deployed. */
   readonly endpoint: Integrity;
+  readonly endpointLabel: string;
   /**
    * The verdict that actually matters. Security is a system property: if the
    * endpoint is compromised, the SYSTEM is compromised — no matter how sound the
@@ -88,38 +104,59 @@ export interface SystemVerdict {
    * so "encryption sound but plaintext harvested" reads as ALARM, not success.
    */
   readonly system: Integrity;
+  readonly systemLabel: string;
   readonly systemSignal: Signal;
   readonly headline: string;
 }
 
 /**
- * Combine the two independent axes into the system verdict. The crux: sound
- * encryption does NOT upgrade a compromised endpoint. The weakest link decides.
+ * Derive the verdict strictly from recorded evidence. The crux: sound encryption
+ * does NOT upgrade a compromised endpoint (the weakest link decides), and a state
+ * that was never observed reads as `untested`, never green.
  */
-export function assessSystem(input: {
-  encryptionSound: boolean;
-  endpointCompromised: boolean;
-}): SystemVerdict {
-  const encryption: Integrity = input.encryptionSound ? "sound" : "compromised";
-  const endpoint: Integrity = input.endpointCompromised ? "compromised" : "sound";
+export function assessSystem(e: Evidence): SystemVerdict {
+  const encryption: Integrity =
+    e.verificationFailures > 0 ? "compromised" : e.messagesVerified > 0 ? "sound" : "untested";
+
+  const endpoint: Integrity = e.endpointCompromised ? "compromised" : "sound";
+
   const system: Integrity =
-    input.encryptionSound && !input.endpointCompromised ? "sound" : "compromised";
+    encryption === "compromised" || e.endpointCompromised
+      ? "compromised"
+      : encryption === "sound"
+        ? "sound"
+        : "untested";
+
+  const encryptionLabel =
+    encryption === "compromised" ? "FAILED" : encryption === "sound" ? "SOUND" : "NOT YET TESTED";
+  const endpointLabel = e.endpointCompromised ? "COMPROMISED" : "NO MODELLED COMPROMISE";
+  const systemLabel =
+    system === "compromised"
+      ? "SYSTEM COMPROMISED"
+      : system === "sound"
+        ? "SECURE UNDER THIS LAB'S ASSUMPTIONS"
+        : "AWAITING EVIDENCE";
 
   let headline: string;
-  if (system === "sound") {
-    headline = "Channel and endpoints intact — plaintext is confidential.";
-  } else if (input.encryptionSound && input.endpointCompromised) {
+  if (system === "untested") {
+    headline = "No messages sent yet and no implant deployed — nothing has been observed.";
+  } else if (encryption === "compromised") {
+    headline = "A message failed authentication — the encryption result is not sound this session.";
+  } else if (e.endpointCompromised) {
     headline =
-      "Encryption held; the endpoint did not. Plaintext was read before it was ever encrypted.";
+      "Encryption held; the endpoint did not. Plaintext is read at the device, before it is ever encrypted.";
   } else {
-    headline = "Encryption itself failed.";
+    headline = "Every delivered message authenticated, and no endpoint compromise is modelled.";
   }
 
   return {
     encryption,
+    encryptionLabel,
     endpoint,
+    endpointLabel,
     system,
-    systemSignal: system === "sound" ? "ok" : "alarm",
+    systemLabel,
+    systemSignal: system === "sound" ? "ok" : system === "compromised" ? "alarm" : "neutral",
     headline,
   };
 }

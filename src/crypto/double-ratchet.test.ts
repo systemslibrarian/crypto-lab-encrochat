@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  decodeWire,
+  encodeWire,
+  GCM_TAG_LEN,
   initReceiver,
   initSender,
   ratchetDecrypt,
   ratchetEncrypt,
+  WIRE_HEADER_LEN,
 } from "./double-ratchet";
 import { fromUtf8, hkdfSha256, toHex, utf8 } from "./primitives";
 import { dh, generateKeyPair } from "./x25519";
@@ -92,6 +96,64 @@ describe("fail-closed integrity", () => {
     const msg = await ratchetEncrypt(alice, utf8("intact"));
     const forged = { ...msg, header: { ...msg.header, n: msg.header.n + 1 } };
     await expect(ratchetDecrypt(bob, forged)).rejects.toThrow();
+  });
+});
+
+describe("transactional receive — a rejected packet commits no state", () => {
+  it("a forged packet is rejected AND the next authentic packet still decrypts", async () => {
+    const { alice, bob } = await pair();
+    const m1 = await ratchetEncrypt(alice, utf8("first"));
+    const m2 = await ratchetEncrypt(alice, utf8("second"));
+
+    expect(fromUtf8(await ratchetDecrypt(bob, m1))).toBe("first");
+
+    // Forge a copy of m2 with a flipped ciphertext byte and deliver it.
+    const forged = { ...m2, ciphertext: new Uint8Array(m2.ciphertext) };
+    forged.ciphertext[1] ^= 0x01;
+    await expect(ratchetDecrypt(bob, forged)).rejects.toThrow();
+
+    // The authentic m2 must STILL decrypt — the forgery poisoned nothing.
+    expect(fromUtf8(await ratchetDecrypt(bob, m2))).toBe("second");
+  });
+
+  it("leaves receive state byte-for-byte unchanged after rejection", async () => {
+    const { alice, bob } = await pair();
+    const m1 = await ratchetEncrypt(alice, utf8("hello"));
+    const forged = { ...m1, ciphertext: new Uint8Array(m1.ciphertext) };
+    forged.ciphertext[0] ^= 0xff;
+
+    const before = JSON.stringify(bob, (_k, val) =>
+      val instanceof Uint8Array ? Array.from(val) : val,
+    );
+    await expect(ratchetDecrypt(bob, forged)).rejects.toThrow();
+    const after = JSON.stringify(bob, (_k, val) =>
+      val instanceof Uint8Array ? Array.from(val) : val,
+    );
+    expect(after).toBe(before);
+  });
+});
+
+describe("canonical wire codec", () => {
+  it("round-trips header + ciphertext + tag", async () => {
+    const { alice, bob } = await pair();
+    const msg = await ratchetEncrypt(alice, utf8("on the wire"));
+    const packet = encodeWire(msg);
+    // total = 40-byte header + ciphertext (which includes the 16-byte tag).
+    expect(packet.length).toBe(WIRE_HEADER_LEN + msg.ciphertext.length);
+    expect(msg.ciphertext.length).toBe(utf8("on the wire").length + GCM_TAG_LEN);
+    const decoded = decodeWire(packet);
+    expect(fromUtf8(await ratchetDecrypt(bob, decoded))).toBe("on the wire");
+  });
+
+  it("a mutation anywhere in the encoded packet is rejected", async () => {
+    const { alice, bob } = await pair();
+    const msg = await ratchetEncrypt(alice, utf8("intact"));
+    const packet = encodeWire(msg);
+    for (const i of [10, WIRE_HEADER_LEN, packet.length - 1]) {
+      const bad = new Uint8Array(packet);
+      bad[i] ^= 0x01;
+      await expect(ratchetDecrypt({ ...bob }, decodeWire(bad))).rejects.toThrow();
+    }
   });
 });
 

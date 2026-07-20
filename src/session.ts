@@ -5,34 +5,48 @@
  *   1. the on-path NETWORK adversary, who sees only the wire and gets nothing;
  *   2. the ENDPOINT implant, who ignores the wire and reads plaintext directly.
  *
- * Every byte here is produced by the real crypto in `crypto/`. The session is
- * seeded deterministically so the demo transcript is reproducible and testable;
- * `randomBytes` still backs everything in the unseeded/production path.
+ * Every byte here is produced by the real crypto in `crypto/`. Production
+ * sessions draw all key material from the platform CSPRNG — a fresh session
+ * every time, so no key or IV is ever reused. A deterministic mode exists ONLY
+ * for tests (opt-in), never in the shipped UI.
  */
 import {
+  decodeWire,
+  encodeWire,
+  GCM_TAG_LEN,
   initReceiver,
   initSender,
   ratchetDecrypt,
   ratchetEncrypt,
+  WIRE_HEADER_LEN,
 } from "./crypto/double-ratchet";
-import {
-  aesGcmDecrypt,
-  aesGcmEncrypt,
-  fromUtf8,
-  hkdfSha256,
-  toHex,
-  utf8,
-} from "./crypto/primitives";
+import { aesGcmDecrypt, fromUtf8, hkdfSha256, randomBytes, toHex, utf8 } from "./crypto/primitives";
 import { dh, generateKeyPair } from "./crypto/x25519";
 import type { RatchetState, WireMessage } from "./crypto/types";
-import { assessSystem, Implant, type Capture, type Party } from "./endpoint/implant";
+import {
+  assessSystem,
+  Implant,
+  type Capture,
+  type Party,
+  type SystemVerdict,
+} from "./endpoint/implant";
 
 export interface WireView {
   readonly headerDhHex: string;
   readonly pn: number;
   readonly n: number;
-  readonly ciphertextHex: string;
-  readonly byteLength: number;
+  /** The full plaintext header bytes: dh(32) || pn(4) || n(4). */
+  readonly headerHex: string;
+  /** Ciphertext body (without the tag). */
+  readonly bodyHex: string;
+  /** The 16-byte AES-GCM authentication tag. */
+  readonly tagHex: string;
+  /** The entire packet exactly as it crosses the network. */
+  readonly packetHex: string;
+  readonly headerBytes: number;
+  readonly bodyBytes: number;
+  readonly tagBytes: number;
+  readonly totalBytes: number;
 }
 
 export interface MessageEvent {
@@ -41,9 +55,9 @@ export interface MessageEvent {
   readonly to: Party;
   readonly plaintext: string;
   readonly wire: WireView;
-  /** What the recipient's real ratchet decrypted. Equal to `plaintext` iff sound. */
+  /** What the recipient's real ratchet decrypted (only set when verified). */
   readonly delivered: string;
-  /** Did the recipient's AEAD tag verify? (Always true on the honest path.) */
+  /** Did the recipient's AEAD tag verify? */
   readonly verified: boolean;
   /** Did receiving this message trigger a DH ratchet step? */
   readonly dhStep: boolean;
@@ -59,17 +73,28 @@ export interface WiretapResult {
 }
 
 export interface TamperResult {
-  readonly rejected: true;
+  readonly rejected: boolean;
+  readonly recovered: boolean;
+  /** Index (in the full packet) of the byte that was flipped. */
+  readonly flippedIndex: number;
   readonly reason: string;
 }
 
 function toWireView(msg: WireMessage): WireView {
+  const packet = encodeWire(msg);
+  const bodyLen = msg.ciphertext.length - GCM_TAG_LEN;
   return {
     headerDhHex: toHex(msg.header.dh),
     pn: msg.header.pn,
     n: msg.header.n,
-    ciphertextHex: toHex(msg.ciphertext),
-    byteLength: msg.ciphertext.length,
+    headerHex: toHex(packet.slice(0, WIRE_HEADER_LEN)),
+    bodyHex: toHex(msg.ciphertext.slice(0, bodyLen)),
+    tagHex: toHex(msg.ciphertext.slice(bodyLen)),
+    packetHex: toHex(packet),
+    headerBytes: WIRE_HEADER_LEN,
+    bodyBytes: bodyLen,
+    tagBytes: GCM_TAG_LEN,
+    totalBytes: packet.length,
   };
 }
 
@@ -81,62 +106,83 @@ async function fingerprint(state: RatchetState): Promise<string> {
   return toHex(tag);
 }
 
+/**
+ * Build a fresh Double Ratchet endpoint pair sharing an initial root key. In
+ * production every key is random (CSPRNG). `deterministic` is a test-only knob
+ * for a reproducible transcript; it is never set by the shipped UI.
+ */
+async function makeEndpoints(
+  deterministic: boolean,
+): Promise<{ alice: RatchetState; bob: RatchetState }> {
+  const seed = deterministic
+    ? (label: string) => utf8(label.padEnd(32, "·")).slice(0, 32)
+    : undefined;
+
+  const aliceIdentity = generateKeyPair(seed?.("alice-identity"));
+  const bobSignedPrekey = generateKeyPair(seed?.("bob-signed-prekey"));
+  const bobRatchet = generateKeyPair(seed?.("bob-ratchet"));
+
+  // Initial shared secret: Alice's identity ⋈ Bob's signed prekey (a one-DH
+  // stand-in; the full X3DH agreement is the sibling lab crypto-lab-x3dh-wire).
+  const rawShared = dh(aliceIdentity, bobSignedPrekey.publicKey);
+  const sharedRootKey = await hkdfSha256(
+    rawShared,
+    new Uint8Array(32),
+    utf8("Encrochat/initial-root"),
+    32,
+  );
+
+  const alice = await initSender(sharedRootKey, bobRatchet.publicKey, seed?.("alice-ratchet"));
+  const bob = initReceiver(sharedRootKey, bobRatchet);
+  return { alice, bob };
+}
+
 export class Session {
   private alice!: RatchetState;
   private bob!: RatchetState;
   private lastWire: WireMessage | null = null;
   private seq = 0;
+  private messagesVerified = 0;
+  private verificationFailures = 0;
   readonly implant = new Implant();
   implantActive = false;
 
   private constructor() {}
 
-  /**
-   * Build a session. The initial root key is seeded from one X25519 handshake
-   * (identity ⋈ prekey); the full X3DH agreement is the sibling lab. Seeds make
-   * the transcript reproducible.
-   */
-  static async create(): Promise<Session> {
+  static async create(opts: { deterministic?: boolean } = {}): Promise<Session> {
     const s = new Session();
-    // Deterministic keys for a stable, inspectable demo transcript.
-    const aliceIdentity = generateKeyPair(seedFrom("alice-identity"));
-    const bobSignedPrekey = generateKeyPair(seedFrom("bob-signed-prekey"));
-    const bobRatchet = generateKeyPair(seedFrom("bob-ratchet"));
-
-    // Initial shared secret: Alice's identity ⋈ Bob's signed prekey.
-    const rawShared = dh(aliceIdentity, bobSignedPrekey.publicKey);
-    const sharedRootKey = await hkdfSha256(
-      rawShared,
-      new Uint8Array(32),
-      utf8("Encrochat/initial-root"),
-      32,
-    );
-
-    s.alice = await initSender(sharedRootKey, bobRatchet.publicKey, seedFrom("alice-ratchet"));
-    s.bob = initReceiver(sharedRootKey, bobRatchet);
+    const { alice, bob } = await makeEndpoints(opts.deterministic ?? false);
+    s.alice = alice;
+    s.bob = bob;
     return s;
+  }
+
+  /** True once at least one packet has been produced (gates the attack controls). */
+  hasPacket(): boolean {
+    return this.lastWire !== null;
   }
 
   /**
    * Send one message end-to-end. Runs the real encrypt → wire → decrypt path.
-   * If the implant is active, it reads the plaintext at both endpoints — without
-   * ever touching a key or the ciphertext.
+   * The implant decision is read ONCE, up front, so a mid-flight toggle cannot
+   * capture only one side of a single message.
    */
   async send(from: Party, plaintext: string): Promise<MessageEvent> {
     const to: Party = from === "alice" ? "bob" : "alice";
     const sender = from === "alice" ? this.alice : this.bob;
     const receiver = from === "alice" ? this.bob : this.alice;
+    const implantOn = this.implantActive;
 
     const captures: Capture[] = [];
     // (1) Endpoint implant reads the composed plaintext BEFORE encryption.
-    if (this.implantActive) captures.push(this.implant.captureOutbound(from, plaintext));
+    if (implantOn) captures.push(this.implant.captureOutbound(from, plaintext));
 
     // (2) Real Double Ratchet encryption.
     const wire = await ratchetEncrypt(sender, utf8(plaintext));
     this.lastWire = wire;
     const ratchetFingerprint = await fingerprint(sender);
 
-    // (3) Real Double Ratchet decryption at the receiver.
+    // (3) Real, transactional Double Ratchet decryption at the receiver.
     const remoteBefore = receiver.dhRemote;
     let delivered = "";
     let verified = false;
@@ -144,15 +190,15 @@ export class Session {
       const pt = await ratchetDecrypt(receiver, wire);
       delivered = fromUtf8(pt);
       verified = true;
+      this.messagesVerified += 1;
     } catch {
       verified = false;
+      this.verificationFailures += 1;
     }
     const dhStep = remoteBefore === null || !sameBytes(remoteBefore, wire.header.dh);
 
     // (4) Endpoint implant reads the delivered plaintext AFTER decryption.
-    if (this.implantActive && verified) {
-      captures.push(this.implant.captureInbound(to, delivered));
-    }
+    if (implantOn && verified) captures.push(this.implant.captureInbound(to, delivered));
 
     return {
       seq: this.seq++,
@@ -170,49 +216,63 @@ export class Session {
 
   /**
    * The network adversary's best shot: try to read the last ciphertext without
-   * the keys. This runs a REAL AES-GCM decryption with a wrong key; it fails,
-   * which is exactly the point — the wire yields nothing.
+   * the keys. Runs a REAL AES-GCM decryption with a random wrong key; it fails.
+   * This is a demonstrated failed attempt plus the security assumption — not a
+   * proof of a general indistinguishability theorem.
    */
   async wiretapAttempt(): Promise<WiretapResult> {
-    if (!this.lastWire) return { ok: false, reason: "No message on the wire yet." };
-    const guessedKey = generateKeyPair(seedFrom("wiretap-guess")).privateKey; // a wrong 32-byte key
-    const iv = new Uint8Array(12);
+    if (!this.lastWire) return { ok: false, reason: "No packet on the wire yet." };
+    const wrongKey = randomBytes(32);
     try {
-      await aesGcmDecrypt(guessedKey, iv, this.lastWire.ciphertext, new Uint8Array(0));
+      await aesGcmDecrypt(wrongKey, new Uint8Array(12), this.lastWire.ciphertext, new Uint8Array(0));
       return { ok: false, reason: "Decryption unexpectedly returned — should never happen." };
     } catch {
       return {
         ok: false,
         reason:
-          "AES-256-GCM authentication failed. Without the ratchet's message key the ciphertext is indistinguishable from random — the network adversary learns nothing but the message length.",
+          "AES-256-GCM authentication failed. Without the ratchet's message key this attempt yields nothing; under standard AEAD assumptions the ciphertext leaks only its length.",
       };
     }
   }
 
   /**
-   * Integrity demonstration with real AES-256-GCM: encrypt a message with a
-   * correct key, flip exactly one ciphertext bit, then decrypt again with that
-   * same correct key. The AEAD tag fails and decryption is rejected — proving
-   * the channel has integrity, not just secrecy, which is what makes a
-   * compromised endpoint the only way in.
+   * Integrity + recovery experiment on a REAL ratchet packet. A fresh, isolated
+   * exchange encrypts an authentic packet; one ciphertext bit is flipped and the
+   * tampered packet is delivered to the real (transactional) recipient — which
+   * rejects it WITHOUT mutating state. The authentic packet is then delivered
+   * and still decrypts, proving a forged packet poisons nothing.
    */
-  async tamperAttempt(): Promise<TamperResult> {
-    const key = generateKeyPair(seedFrom("integrity-demo")).privateKey; // a real 32-byte AES key
-    const iv = new Uint8Array(12);
-    const aad = utf8("Encrochat/Double-Ratchet/AD");
-    const good = await aesGcmEncrypt(key, iv, utf8("meet at the usual place"), aad);
-    const forged = new Uint8Array(good);
-    forged[0] ^= 0x01; // flip one bit
+  async tamperAndRecover(): Promise<TamperResult> {
+    const { alice, bob } = await makeEndpoints(false);
+    const authentic = await ratchetEncrypt(alice, utf8("meet at the usual place"));
+    const packet = encodeWire(authentic);
+    const flippedIndex = WIRE_HEADER_LEN + 1; // a ciphertext-body byte
+    const tampered = new Uint8Array(packet);
+    tampered[flippedIndex] ^= 0x01;
+
+    let rejected = false;
     try {
-      await aesGcmDecrypt(key, iv, forged, aad); // correct key, tampered ciphertext
-      return { rejected: true, reason: "unreachable" };
+      await ratchetDecrypt(bob, decodeWire(tampered));
     } catch {
-      return {
-        rejected: true,
-        reason:
-          "Same correct key, one flipped bit — AES-256-GCM authentication fails and the message is rejected. A single-bit change invalidates the 128-bit tag: the channel has integrity, not just secrecy.",
-      };
+      rejected = true;
     }
+
+    let recovered = false;
+    try {
+      recovered = fromUtf8(await ratchetDecrypt(bob, decodeWire(packet))) === "meet at the usual place";
+    } catch {
+      recovered = false;
+    }
+
+    return {
+      rejected,
+      recovered,
+      flippedIndex,
+      reason:
+        rejected && recovered
+          ? `Byte ${flippedIndex} flipped: AES-256-GCM rejected the forged packet, and because rejection commits no state, the authentic packet still decrypted. Integrity and recovery, not just secrecy.`
+          : "Unexpected: the integrity experiment did not behave as required.",
+    };
   }
 
   setImplant(active: boolean): void {
@@ -220,9 +280,10 @@ export class Session {
     if (!active) this.implant.clear();
   }
 
-  verdict() {
+  verdict(): SystemVerdict {
     return assessSystem({
-      encryptionSound: true,
+      messagesVerified: this.messagesVerified,
+      verificationFailures: this.verificationFailures,
       endpointCompromised: this.implantActive,
     });
   }
@@ -230,10 +291,4 @@ export class Session {
 
 function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
   return a.length === b.length && a.every((x, i) => x === b[i]);
-}
-
-/** Deterministic 32-byte seed from a label (demo reproducibility only). */
-function seedFrom(label: string): Uint8Array {
-  const bytes = utf8(label.padEnd(32, "·"));
-  return bytes.slice(0, 32);
 }

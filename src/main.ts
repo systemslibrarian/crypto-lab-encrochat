@@ -1,6 +1,6 @@
 import "./style.css";
 import { clear, el } from "./dom";
-import { Session, type MessageEvent } from "./session";
+import { Session, type MessageEvent, type WireView } from "./session";
 import type { Party } from "./endpoint/implant";
 
 /* ── Scripted conversation ────────────────────────────────────────────────────
@@ -16,15 +16,23 @@ const SCRIPT: Array<{ from: Party; text: string }> = [
 
 let session: Session;
 let scriptIndex = 0;
+let sentCount = 0;
+let verifiedCount = 0;
 
 /* Dynamic regions, wired once and updated in place. */
+let appRoot: HTMLElement;
 let convoEl: HTMLElement;
 let wireMetaEl: HTMLElement;
 let hexEl: HTMLElement;
 let ratchetEl: HTMLElement;
 let breakStatusEl: HTMLElement;
+let errorEl: HTMLElement;
 let sendScriptBtn: HTMLButtonElement;
+let resetBtn: HTMLButtonElement;
 let customInput: HTMLInputElement;
+let customSend: HTMLButtonElement;
+let tapBtn: HTMLButtonElement;
+let tamperBtn: HTMLButtonElement;
 let implantSwitch: HTMLButtonElement;
 let implantStatusEl: HTMLElement;
 let captureListEl: HTMLElement;
@@ -33,8 +41,48 @@ let encVerdictEl: HTMLElement;
 let endpointVerdictEl: HTMLElement;
 let systemVerdictEl: HTMLElement;
 
-let messageCount = 0;
+/* ── One serialized command queue ─────────────────────────────────────────────
+   Every state-changing action runs to completion before the next starts, so two
+   fast clicks (or Enter + click) can never race the ratchet into reusing a
+   message key/IV, reordering output, or throwing. Controls are disabled and
+   aria-busy is set while a command runs. */
+let opLock: Promise<unknown> = Promise.resolve();
 
+function runOp(fn: () => Promise<void>): Promise<void> {
+  const task = opLock.then(async () => {
+    setBusy(true);
+    errorEl.textContent = "";
+    try {
+      await fn();
+    } catch (err) {
+      errorEl.textContent = `Something went wrong: ${err instanceof Error ? err.message : String(err)}`;
+    } finally {
+      setBusy(false);
+    }
+  });
+  opLock = task.catch(() => undefined);
+  return task;
+}
+
+function setBusy(busy: boolean): void {
+  appRoot.setAttribute("aria-busy", busy ? "true" : "false");
+  const all = [sendScriptBtn, resetBtn, customSend, tapBtn, tamperBtn, implantSwitch];
+  for (const c of all) c.disabled = true;
+  customInput.disabled = busy;
+  if (!busy) refreshControls();
+}
+
+function refreshControls(): void {
+  sendScriptBtn.disabled = scriptIndex >= SCRIPT.length;
+  resetBtn.disabled = false;
+  customSend.disabled = false;
+  tapBtn.disabled = !session.hasPacket();
+  tamperBtn.disabled = false;
+  implantSwitch.disabled = false;
+  customInput.disabled = false;
+}
+
+/* ── Hero ─────────────────────────────────────────────────────────────────── */
 function hero(): HTMLElement {
   return el(
     "header",
@@ -46,7 +94,7 @@ function hero(): HTMLElement {
       el("p", { class: "cl-hero-sub", text: "Endpoint Compromise · eprint 2026/1319" }),
       el("p", {
         class: "cl-hero-desc",
-        text: "Run a real Signal-protocol Double Ratchet exchange, watch the wire stay opaque, then deploy an endpoint implant and see it read the plaintext the cryptography just protected perfectly.",
+        text: "Run a real (in-order) Signal-protocol Double Ratchet exchange, watch the wire stay opaque, then deploy an endpoint implant and see it read the plaintext the cryptography just protected perfectly.",
       }),
     ),
     el(
@@ -55,7 +103,7 @@ function hero(): HTMLElement {
       el("span", { class: "cl-hero-why-label", text: "WHY IT MATTERS" }),
       el("p", {
         class: "cl-hero-why-text",
-        text: "In 2020, Encrochat's encrypted messages were read by the million — not by breaking the maths, but by owning the phones. Unbreakable encryption is worthless the moment the device it runs on is not yours.",
+        text: "In 2020, Encrochat's messages were read by the million — not by breaking the maths, but by owning the phones. When the device is compromised, plaintext is exposed at that endpoint, even while the encryption keeps protecting the channel from everyone else.",
       }),
     ),
   );
@@ -73,7 +121,7 @@ function intro(): HTMLElement {
       ": noise.",
     ),
     el("p", {
-      text: "Encrochat sold phones that did exactly this, correctly, using the same Double Ratchet protocol behind Signal and WhatsApp. It was still defeated. Not by cracking the encryption — by putting code on the phone itself, where the message exists as plain text before it is ever encrypted and after it is decrypted.",
+      text: "Encrochat sold phones built around this exact protocol — the same Double Ratchet behind Signal and WhatsApp. They were still defeated: not by cracking the encryption, but by putting code on the phone itself, where the message exists as plain text before it is ever encrypted and after it is decrypted.",
     }),
     el(
       "p",
@@ -98,7 +146,7 @@ function exhibitA(): HTMLElement {
     ),
     el("p", {
       class: "section-lede",
-      text: "Every message below is genuinely encrypted in your browser with X25519, HKDF-SHA256 and AES-256-GCM. The left pane is the conversation; the right pane is the exact bytes an on-path eavesdropper captures.",
+      text: "Every message below is genuinely encrypted in your browser with X25519, HKDF-SHA256 and AES-256-GCM. The left pane is the conversation; the right pane is the exact packet — header, ciphertext and authentication tag — that an on-path eavesdropper captures.",
     }),
   );
 
@@ -127,7 +175,7 @@ function exhibitA(): HTMLElement {
     class: "hex",
     role: "group",
     tabindex: "0",
-    "aria-label": "Ciphertext bytes visible on the wire",
+    "aria-label": "The packet bytes visible on the wire: header, ciphertext and tag",
   });
   const wirePane = el(
     "div",
@@ -136,7 +184,7 @@ function exhibitA(): HTMLElement {
       "div",
       { class: "pane-label" },
       el("span", { "aria-hidden": "true", text: "📡" }),
-      el("span", { text: "On the wire (what an eavesdropper captures)" }),
+      el("span", { text: "On the wire (the exact packet captured)" }),
     ),
     el(
       "div",
@@ -145,7 +193,7 @@ function exhibitA(): HTMLElement {
       hexEl,
       el("p", {
         class: "wire-verdict",
-        text: "This is the entire message as it crosses the network. No key, no plaintext — just an authenticated blob.",
+        text: "The whole packet as it crosses the network. Its length and header leak; the plaintext does not.",
       }),
     ),
   );
@@ -175,8 +223,8 @@ function exhibitA(): HTMLElement {
   sendScriptBtn = el("button", { class: "btn btn-primary", type: "button" }) as HTMLButtonElement;
   sendScriptBtn.append(el("span", { "aria-hidden": "true", text: "➤" }), document.createTextNode(" Send next message"));
   sendScriptBtn.addEventListener("click", () => void sendScripted());
-  const resetBtn = el("button", { class: "btn", type: "button", text: "Reset conversation" }) as HTMLButtonElement;
-  resetBtn.addEventListener("click", () => void reset());
+  resetBtn = el("button", { class: "btn", type: "button", text: "Reset conversation" }) as HTMLButtonElement;
+  resetBtn.addEventListener("click", () => void doReset());
   card.append(el("div", { class: "controls" }, sendScriptBtn, resetBtn));
 
   // Compose your own.
@@ -186,7 +234,7 @@ function exhibitA(): HTMLElement {
     placeholder: "Type a message to send as Alice…",
     maxlength: "120",
   }) as HTMLInputElement;
-  const customSend = el("button", { class: "btn", type: "button", text: "Encrypt & send" }) as HTMLButtonElement;
+  customSend = el("button", { class: "btn", type: "button", text: "Encrypt & send" }) as HTMLButtonElement;
   customSend.addEventListener("click", () => void sendCustom());
   customInput.addEventListener("keydown", (e) => {
     if ((e as KeyboardEvent).key === "Enter") void sendCustom();
@@ -202,16 +250,13 @@ function exhibitA(): HTMLElement {
   );
 
   // Break-it-yourself: prove the wire is opaque and tamper-evident.
-  breakStatusEl = el("div", {
-    class: "break-status",
-    role: "status",
-    "aria-live": "polite",
-  });
-  const tapBtn = el("button", { class: "btn", type: "button" }) as HTMLButtonElement;
+  breakStatusEl = el("div", { class: "break-status", role: "status", "aria-live": "polite" });
+  errorEl = el("div", { class: "error-status", role: "alert" });
+  tapBtn = el("button", { class: "btn", type: "button" }) as HTMLButtonElement;
   tapBtn.append(el("span", { "aria-hidden": "true", text: "🕵" }), document.createTextNode(" Tap the wire (no keys)"));
   tapBtn.addEventListener("click", () => void doWiretap());
-  const tamperBtn = el("button", { class: "btn", type: "button" }) as HTMLButtonElement;
-  tamperBtn.append(el("span", { "aria-hidden": "true", text: "✂" }), document.createTextNode(" Flip a bit of ciphertext"));
+  tamperBtn = el("button", { class: "btn", type: "button" }) as HTMLButtonElement;
+  tamperBtn.append(el("span", { "aria-hidden": "true", text: "✂" }), document.createTextNode(" Forge a packet & recover"));
   tamperBtn.addEventListener("click", () => void doTamper());
 
   const breakBlock = el("details", { class: "more" });
@@ -221,10 +266,11 @@ function exhibitA(): HTMLElement {
       "div",
       {},
       el("p", {
-        text: "The network adversary has the full ciphertext. Give them the best shot: attempt a decryption without the key, or tamper with a byte and hand it to the real recipient.",
+        text: "The network adversary has the full packet. Give them the best shot: attempt a decryption without the key (needs a captured packet), or run an isolated real exchange, flip one ciphertext bit, and watch the recipient reject the forgery while the authentic packet still decrypts.",
       }),
       el("div", { class: "controls" }, tapBtn, tamperBtn),
       breakStatusEl,
+      errorEl,
     ),
   );
   card.append(breakBlock);
@@ -251,30 +297,22 @@ function exhibitB(): HTMLElement {
 
   const card = el("section", { class: "card danger-zone" });
 
-  implantSwitch = el("button", {
-    class: "switch",
-    type: "button",
-    "aria-pressed": "false",
-  }) as HTMLButtonElement;
+  implantSwitch = el("button", { class: "switch", type: "button", "aria-pressed": "false" }) as HTMLButtonElement;
   implantSwitch.append(
     el("span", { class: "dot", "aria-hidden": "true" }),
     el("span", { class: "switch-label", text: "Deploy implant on the devices" }),
   );
-  implantSwitch.addEventListener("click", toggleImplant);
+  implantSwitch.addEventListener("click", () => void toggleImplant());
 
   implantStatusEl = el("div", {
     class: "hint",
     role: "status",
     "aria-live": "polite",
-    text: "Endpoints clean. Plaintext exists only in each device's memory.",
+    text: "No implant deployed. Plaintext exists only in each device's memory.",
   });
   card.append(el("div", { class: "toggle-row" }, implantSwitch, implantStatusEl));
 
-  // Side-by-side: the wire (unchanged) vs the endpoint (leaking).
-  wireMirrorEl = el("p", {
-    class: "hint",
-    text: "Send a message to populate the wire.",
-  });
+  wireMirrorEl = el("p", { class: "hint", text: "Send a message to populate the wire." });
   const wireMirror = el(
     "div",
     {},
@@ -327,23 +365,16 @@ function exhibitC(): HTMLElement {
     ),
     el("p", {
       class: "section-lede",
-      text: "Message encryption and endpoint integrity are independent axes. A green cipher does not upgrade a red device — the weakest link sets the system verdict, and the colour tracks the system.",
+      text: "Message encryption and endpoint integrity are independent axes, and every status here is derived from what was actually observed — not asserted. A green cipher does not upgrade a red device; the weakest link sets the system verdict.",
     }),
   );
 
   encVerdictEl = el("div", { class: "verdict" });
   endpointVerdictEl = el("div", { class: "verdict" });
-  systemVerdictEl = el("div", {
-    class: "system-verdict",
-    role: "status",
-    "aria-live": "polite",
-  });
+  systemVerdictEl = el("div", { class: "system-verdict", role: "status", "aria-live": "polite" });
 
   const card = el("section", { class: "card" });
-  card.append(
-    el("div", { class: "verdict-grid" }, encVerdictEl, endpointVerdictEl),
-    systemVerdictEl,
-  );
+  card.append(el("div", { class: "verdict-grid" }, encVerdictEl, endpointVerdictEl), systemVerdictEl);
   section.append(card);
   return section;
 }
@@ -410,7 +441,7 @@ function scopingDetails(): HTMLElement {
         text: "This lab models the principle, never a method. It contains no operational or acquisition detail for compromising an endpoint — that is out of scope by design. The implant here is a passive reader of application plaintext, which is sufficient to make the point and nothing more.",
       }),
       el("p", {
-        text: "Session setup seeds the initial root key from a single X25519 handshake for clarity; the full X3DH initial agreement (identity, signed prekey, one-time prekey) is the sibling lab crypto-lab-x3dh-wire. Out-of-order and skipped-message handling is omitted — the demo delivers in order.",
+        text: "It is an in-order Double Ratchet teaching subset: session setup seeds the initial root key from a single X25519 handshake for clarity (the full X3DH agreement is the sibling lab crypto-lab-x3dh-wire), and out-of-order / skipped-message handling is omitted. Every production session draws fresh random keys, so no key or IV is reused; a rejected packet commits no ratchet state.",
       }),
     ),
   );
@@ -425,7 +456,7 @@ function scoping(): HTMLElement {
       "ul",
       {},
       el("li", {}, "This is ", el("b", { text: "not production crypto" }), " — it is a teaching demo. Do not protect real secrets with it."),
-      el("li", {}, el("b", { text: "Real: " }), "the Double Ratchet, X25519, HKDF-SHA256 and AES-256-GCM all run for real and pass spec known-answer tests. Ciphertext on the wire is genuinely opaque and tamper-evident."),
+      el("li", {}, el("b", { text: "Real: " }), "the Double Ratchet, X25519, HKDF-SHA256 and AES-256-GCM all run for real and pass spec known-answer tests. Ciphertext on the wire is genuinely opaque and tamper-evident, and a rejected packet leaves the ratchet unchanged."),
       el("li", {}, el("b", { text: "Modelled: " }), "the endpoint implant is a stand-in for “code on the device” — it reads app plaintext directly. It carries no technique for getting there."),
       el("li", {}, el("b", { text: "What it does NOT prove: " }), "nothing here weakens the Signal protocol or the Double Ratchet. The point is the opposite — the cryptography was sound and the system still failed at the endpoint."),
       el("li", {}, "Based on the public account in Albrecht, Park, Specter & Stebila, ", el("i", { text: "“A Real-World Law-Enforcement Hack: The Case of Encrochat”" }), " (eprint 2026/1319). No attribution or legal commentary."),
@@ -435,50 +466,67 @@ function scoping(): HTMLElement {
 }
 
 /* ── Rendering updates ────────────────────────────────────────────────────── */
+function seg(label: string, hex: string, cls: string): HTMLElement {
+  return el(
+    "div",
+    { class: `wire-seg ${cls}` },
+    el("span", { class: "seg-label", text: label }),
+    el("span", { class: "seg-hex", text: hex || "—" }),
+  );
+}
+
+function renderWire(view: WireView): void {
+  clear(wireMetaEl);
+  wireMetaEl.append(
+    el("span", {}, "dh ", el("b", { text: view.headerDhHex.slice(0, 16) + "…" })),
+    el("span", {}, "pn ", el("b", { text: String(view.pn) })),
+    el("span", {}, "n ", el("b", { text: String(view.n) })),
+    el("span", {}, "total ", el("b", { text: `${view.totalBytes} B` })),
+  );
+  clear(hexEl);
+  hexEl.append(
+    seg(`header · ${view.headerBytes} B`, view.headerHex, "seg-header"),
+    seg(`ciphertext · ${view.bodyBytes} B`, view.bodyHex, "seg-body"),
+    seg(`GCM tag · ${view.tagBytes} B`, view.tagHex, "seg-tag"),
+  );
+  wireMirrorEl.textContent = `Latest packet: ${view.totalBytes} bytes (header ${view.headerBytes} + ciphertext ${view.bodyBytes} + tag ${view.tagBytes}). Identical whether or not the implant is deployed.`;
+}
+
 function appendEvent(event: MessageEvent): void {
-  messageCount += 1;
+  sentCount += 1;
+  if (event.verified) verifiedCount += 1;
 
   const bubble = el(
     "div",
     { class: `bubble from-${event.from}` },
     el("div", { class: "who", text: event.from === "alice" ? "Alice" : "Bob" }),
     el("div", { class: "text", text: event.plaintext }),
+    !event.verified ? el("div", { class: "bubble-warn", text: "⚠ not delivered — authentication failed" }) : null,
   );
   convoEl.append(bubble);
   convoEl.scrollTop = convoEl.scrollHeight;
 
-  // Wire pane — latest ciphertext.
-  clear(wireMetaEl);
-  wireMetaEl.append(
-    el("span", {}, "dh ", el("b", { text: event.wire.headerDhHex.slice(0, 16) + "…" })),
-    el("span", {}, "pn ", el("b", { text: String(event.wire.pn) })),
-    el("span", {}, "n ", el("b", { text: String(event.wire.n) })),
-    el("span", {}, "bytes ", el("b", { text: String(event.wire.byteLength) })),
-  );
-  hexEl.textContent = event.wire.ciphertextHex;
-
-  // Wire mirror in Exhibit B.
-  wireMirrorEl.textContent = `Latest ciphertext: ${event.wire.byteLength} bytes, header + AES-256-GCM tag. Identical whether or not the implant is deployed.`;
+  renderWire(event.wire);
 
   // Ratchet chip.
   const chip = el("li", { class: `rk-chip${event.dhStep ? " dh-step" : ""}` });
   chip.append(
     el("span", { class: "rk-n", text: `${event.from === "alice" ? "A" : "B"} · msg ${event.wire.n}` }),
     el("div", { class: "rk-fp", text: event.ratchetFingerprint }),
-    event.dhStep
-      ? el("span", { class: "rk-tag", text: "⟳ DH step" })
-      : el("span", { class: "rk-tag", text: "chain +1" }),
+    el("span", { class: "rk-tag", text: event.dhStep ? "⟳ DH step" : "chain +1" }),
   );
   ratchetEl.append(chip);
 
   // Captures (Exhibit B).
   for (const cap of event.captures) {
-    const li = el("li", {});
-    li.append(
-      el("span", { class: "cap-meta", text: `${cap.party} · ${cap.point}` }),
-      el("div", { class: "cap-text", text: cap.plaintext }),
+    captureListEl.append(
+      el(
+        "li",
+        {},
+        el("span", { class: "cap-meta", text: `${cap.party} · ${cap.point}` }),
+        el("div", { class: "cap-text", text: cap.plaintext }),
+      ),
     );
-    captureListEl.append(li);
   }
 
   updateVerdicts();
@@ -487,26 +535,27 @@ function appendEvent(event: MessageEvent): void {
 function updateVerdicts(): void {
   const v = session.verdict();
 
-  // Encryption card — always sound on the honest path.
-  encVerdictEl.className = "verdict state-ok";
+  encVerdictEl.className = `verdict state-${v.encryption === "sound" ? "ok" : v.encryption === "compromised" ? "alarm" : "untested"}`;
   clear(encVerdictEl);
   encVerdictEl.append(
     el("div", { class: "v-label", text: "Message encryption" }),
     el(
       "div",
       { class: "v-status" },
-      el("span", { class: "v-icon", "aria-hidden": "true", text: "✓" }),
-      el("span", { text: "SOUND" }),
+      el("span", { class: "v-icon", "aria-hidden": "true", text: v.encryption === "sound" ? "✓" : v.encryption === "compromised" ? "✗" : "•" }),
+      el("span", { text: v.encryptionLabel }),
     ),
     el("div", {
       class: "v-note",
-      text: `Double Ratchet over X25519 · HKDF-SHA256 · AES-256-GCM. ${messageCount} message${messageCount === 1 ? "" : "s"} sent, every AEAD tag verified. Each message used a fresh, one-way-derived key.`,
+      text:
+        v.encryption === "untested"
+          ? "No messages delivered yet. Send one and the recipient's AEAD tag is checked for real."
+          : `${verifiedCount} of ${sentCount} message${sentCount === 1 ? "" : "s"} authenticated at the recipient (Double Ratchet · X25519 · HKDF-SHA256 · AES-256-GCM). Each used a fresh, one-way-derived key.`,
     }),
   );
 
-  // Endpoint card — tracks the implant.
-  const compromised = session.implantActive;
-  endpointVerdictEl.className = `verdict ${compromised ? "state-alarm" : "state-ok"}`;
+  const compromised = v.endpoint === "compromised";
+  endpointVerdictEl.className = `verdict state-${compromised ? "alarm" : "ok"}`;
   clear(endpointVerdictEl);
   endpointVerdictEl.append(
     el("div", { class: "v-label", text: "Endpoint integrity" }),
@@ -514,103 +563,115 @@ function updateVerdicts(): void {
       "div",
       { class: "v-status" },
       el("span", { class: "v-icon", "aria-hidden": "true", text: compromised ? "✗" : "✓" }),
-      el("span", { text: compromised ? "COMPROMISED" : "INTACT" }),
+      el("span", { text: v.endpointLabel }),
     ),
     el("div", {
       class: "v-note",
       text: compromised
         ? "An implant reads plaintext at the device — before encryption and after decryption. It never needed a key."
-        : "No implant. Plaintext lives only in each device's memory and is never exposed.",
+        : "No modelled implant. (Absence of a modelled compromise is not proof a real device is clean.)",
     }),
   );
 
-  // System banner.
-  systemVerdictEl.className = `system-verdict ${v.systemSignal === "ok" ? "state-ok" : "state-alarm"}`;
+  systemVerdictEl.className = `system-verdict state-${v.systemSignal}`;
   clear(systemVerdictEl);
   systemVerdictEl.append(
-    el("span", { class: "sv-icon", "aria-hidden": "true", text: v.systemSignal === "ok" ? "🛡" : "🚨" }),
+    el("span", { class: "sv-icon", "aria-hidden": "true", text: v.systemSignal === "ok" ? "🛡" : v.systemSignal === "alarm" ? "🚨" : "•" }),
     el(
       "div",
       {},
-      el("div", {
-        class: "sv-title",
-        text: v.system === "sound" ? "SYSTEM SECURE" : "SYSTEM COMPROMISED",
-      }),
+      el("div", { class: "sv-title", text: v.systemLabel }),
       el("div", { class: "sv-body", text: v.headline }),
     ),
   );
 }
 
-/* ── Actions ──────────────────────────────────────────────────────────────── */
-async function sendScripted(): Promise<void> {
-  if (scriptIndex >= SCRIPT.length) {
-    breakStatusEl.textContent = "End of the scripted exchange — compose your own below, or reset.";
-    sendScriptBtn.disabled = true;
-    return;
-  }
-  const { from, text } = SCRIPT[scriptIndex++];
-  const event = await session.send(from, text);
-  appendEvent(event);
-  if (scriptIndex >= SCRIPT.length) sendScriptBtn.disabled = true;
+/* ── Actions (all serialized through runOp) ───────────────────────────────── */
+function sendScripted(): Promise<void> {
+  return runOp(async () => {
+    if (scriptIndex >= SCRIPT.length) {
+      breakStatusEl.textContent = "End of the scripted exchange — compose your own below, or reset.";
+      return;
+    }
+    const item = SCRIPT[scriptIndex];
+    const event = await session.send(item.from, item.text);
+    scriptIndex += 1; // advance only after the command commits
+    appendEvent(event);
+  });
 }
 
-async function sendCustom(): Promise<void> {
-  const text = customInput.value.trim();
-  if (!text) return;
-  customInput.value = "";
-  const event = await session.send("alice", text);
-  appendEvent(event);
+function sendCustom(): Promise<void> {
+  return runOp(async () => {
+    const text = customInput.value.trim();
+    if (!text) return;
+    const event = await session.send("alice", text);
+    customInput.value = "";
+    appendEvent(event);
+  });
 }
 
-async function doWiretap(): Promise<void> {
-  const r = await session.wiretapAttempt();
-  breakStatusEl.textContent = `🔒 Wiretap failed. ${r.reason}`;
+function doWiretap(): Promise<void> {
+  return runOp(async () => {
+    const r = await session.wiretapAttempt();
+    breakStatusEl.textContent = `🔒 Wiretap failed. ${r.reason}`;
+  });
 }
 
-async function doTamper(): Promise<void> {
-  const r = await session.tamperAttempt();
-  breakStatusEl.textContent = `🛡 Tamper rejected. ${r.reason}`;
+function doTamper(): Promise<void> {
+  return runOp(async () => {
+    const r = await session.tamperAndRecover();
+    breakStatusEl.textContent = `${r.rejected && r.recovered ? "🛡" : "⚠"} ${r.reason}`;
+  });
 }
 
-function toggleImplant(): void {
-  const next = !session.implantActive;
-  session.setImplant(next);
-  implantSwitch.setAttribute("aria-pressed", String(next));
-  const label = implantSwitch.querySelector(".switch-label");
-  if (label) label.textContent = next ? "Implant deployed — click to remove" : "Deploy implant on the devices";
-  implantStatusEl.textContent = next
-    ? "Implant active. Send a message and watch it harvest the plaintext — while the wire and the cipher are unchanged."
-    : "Endpoints clean. Plaintext exists only in each device's memory.";
-  if (!next) clear(captureListEl);
-  updateVerdicts();
+function toggleImplant(): Promise<void> {
+  return runOp(async () => {
+    const next = !session.implantActive;
+    session.setImplant(next);
+    implantSwitch.setAttribute("aria-pressed", String(next));
+    const label = implantSwitch.querySelector(".switch-label");
+    if (label) label.textContent = next ? "Implant deployed — click to remove" : "Deploy implant on the devices";
+    implantStatusEl.textContent = next
+      ? "Implant active. Send a message and watch it harvest the plaintext — while the wire and the cipher are unchanged."
+      : "No implant deployed. Plaintext exists only in each device's memory.";
+    if (!next) clear(captureListEl);
+    updateVerdicts();
+  });
 }
 
-async function reset(): Promise<void> {
-  session = await Session.create();
-  session.setImplant(implantSwitch.getAttribute("aria-pressed") === "true");
-  scriptIndex = 0;
-  messageCount = 0;
-  sendScriptBtn.disabled = false;
-  clear(convoEl);
-  clear(ratchetEl);
-  clear(captureListEl);
-  clear(wireMetaEl);
-  hexEl.textContent = "";
-  wireMirrorEl.textContent = "Send a message to populate the wire.";
-  breakStatusEl.textContent = "";
-  updateVerdicts();
+function doReset(): Promise<void> {
+  return runOp(async () => {
+    const keepImplant = implantSwitch.getAttribute("aria-pressed") === "true";
+    session = await Session.create();
+    session.setImplant(keepImplant);
+    scriptIndex = 0;
+    sentCount = 0;
+    verifiedCount = 0;
+    clear(convoEl);
+    clear(ratchetEl);
+    clear(captureListEl);
+    clear(wireMetaEl);
+    clear(hexEl);
+    wireMirrorEl.textContent = "Send a message to populate the wire.";
+    breakStatusEl.textContent = "";
+    errorEl.textContent = "";
+    updateVerdicts();
+  });
 }
 
 /* ── Boot ─────────────────────────────────────────────────────────────────── */
 async function main(): Promise<void> {
   const app = document.getElementById("app");
   if (!app) return;
+  appRoot = app;
   session = await Session.create();
 
   clear(app);
   app.append(hero(), intro(), exhibitA(), exhibitB(), exhibitC(), exhibitD(), scoping());
 
   updateVerdicts();
+  refreshControls();
+  app.setAttribute("aria-busy", "false");
 }
 
 void main();
