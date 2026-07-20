@@ -1,0 +1,761 @@
+/* ============================================================================
+   Encrochat — crypto-lab
+   Palette tuned around the catalog accent #5a8f7b. Every colour pairing here is
+   authored for WCAG 2.1 AA in BOTH themes; the axe gate enforces it.
+   ============================================================================ */
+
+/* ── Design tokens: dark (default) ── */
+:root {
+  --bg: #0c1411;
+  --bg-alt: #0f1a15;
+  --surface: #14211b;
+  --surface-soft: #1c2c25;
+  --text: #eaf3ee;
+  --text-dim: #bcd0c6; /* ~9:1 on --surface */
+  --text-muted: #a3b8ad; /* ~6:1 on --surface */
+  --accent: #5a8f7b; /* catalog accent — borders / large UI only */
+  --accent-text: #83bda6; /* accent as body text: ~5.4:1 on --surface */
+  --border: #2a3d35;
+  --border-strong: #3a5449;
+
+  --ok-text: #71cf9c; /* ~6:1 on --surface */
+  --ok-line: #3f8f66;
+  --alarm-text: #ff8585; /* ~5.5:1 on --surface */
+  --alarm-line: #c85454;
+
+  --btn-bg: #6ba892;
+  --btn-ink: #05100c; /* dark ink on light-green button: ~7:1 */
+  --wire-bg: #0a120f;
+  --shadow: 0 18px 50px rgba(0, 0, 0, 0.4);
+  --focus-ring: 0 0 0 3px var(--accent-text);
+
+  color-scheme: dark;
+}
+
+/* ── Design tokens: light ── */
+:root[data-theme="light"] {
+  --bg: #eef2f0;
+  --bg-alt: #e3ebe7;
+  --surface: #ffffff;
+  --surface-soft: #f0f5f2;
+  --text: #14201b;
+  --text-dim: #3c4d45; /* ~8:1 on white */
+  --text-muted: #4e6058; /* ~6:1 on white */
+  --accent: #3a7a61;
+  --accent-text: #276048; /* accent as body text: ~5.6:1 on white */
+  --border: #cddbd4;
+  --border-strong: #a9c1b6;
+
+  --ok-text: #1c7a4b; /* ~4.9:1 on white */
+  --ok-line: #2f8f5e;
+  --alarm-text: #c0271d; /* ~5.4:1 on white */
+  --alarm-line: #c0271d;
+
+  --btn-bg: #276048;
+  --btn-ink: #ffffff; /* ~7:1 on dark-green button */
+  --wire-bg: #10201a;
+  --shadow: 0 16px 36px rgba(20, 50, 38, 0.12);
+  --focus-ring: 0 0 0 3px var(--accent);
+
+  color-scheme: light;
+}
+
+/* html owns its own background-color (longhand — axe/WebKit miss the shorthand). */
+html {
+  background-color: var(--bg);
+}
+:root[data-theme="light"] html {
+  background-color: var(--bg);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.loading-msg {
+  text-align: center;
+  padding: 4rem 1rem;
+  color: var(--text-dim);
+  font-size: 1.1rem;
+}
+
+/* Scope base element rules to #app so they never fight the always-dark topbar. */
+#app {
+  display: block;
+  max-width: 62rem;
+  margin: 0 auto;
+  padding: 0 clamp(1rem, 4vw, 2rem) 3rem;
+}
+#app p {
+  margin: 0 0 0.6rem;
+}
+#app a {
+  color: var(--accent-text);
+  text-decoration: underline; /* inline links: never colour alone */
+  text-underline-offset: 2px;
+}
+#app a:hover {
+  color: var(--text);
+}
+
+:where(button, input, textarea, a):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: 8px;
+}
+
+/* ── Hero ─────────────────────────────────────────────────────────────────── */
+/* BEGIN cl-hero standard — managed, keep in sync across fleet */
+.cl-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: clamp(1rem, 4vw, 3rem);
+  flex-wrap: wrap;
+  margin: clamp(1rem, 3vw, 2rem) 0 1.5rem;
+}
+.cl-hero-main {
+  flex: 1 1 22rem;
+  min-width: min(100%, 20rem);
+}
+.cl-hero-title {
+  margin: 0;
+  font-size: clamp(1.6rem, 3.8vw, 2.7rem);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: 0.01em;
+}
+.cl-hero-sub {
+  margin: 0.4rem 0 0;
+  font-size: clamp(0.9rem, 1.6vw, 1.05rem);
+  letter-spacing: 0.01em;
+  color: var(--accent-text);
+}
+.cl-hero-desc {
+  margin: 0.55rem 0 0;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--text-dim);
+  max-width: 60ch;
+}
+.cl-hero-why {
+  flex: 0 1 min(40%, 26rem);
+  min-width: min(100%, 15rem);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.85rem 1.05rem;
+  background: color-mix(in oklab, var(--accent) 6%, transparent);
+}
+.cl-hero-why-label {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--accent-text);
+}
+.cl-hero-why-text {
+  margin: 0.35rem 0 0;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+@media (max-width: 640px) {
+  .cl-hero {
+    flex-direction: column;
+  }
+  .cl-hero-why {
+    flex-basis: auto;
+    width: 100%;
+  }
+}
+/* END cl-hero standard */
+
+/* ── Sections & panels ────────────────────────────────────────────────────── */
+.section {
+  margin: 2.25rem 0 0;
+}
+.section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.35rem;
+}
+.section-kicker {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--accent-text);
+  text-transform: uppercase;
+}
+.section-title {
+  margin: 0;
+  font-size: clamp(1.15rem, 2.4vw, 1.5rem);
+  font-weight: 700;
+  line-height: 1.2;
+}
+.section-lede {
+  margin: 0.15rem 0 1rem;
+  color: var(--text-dim);
+  max-width: 68ch;
+}
+
+.card {
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: clamp(1rem, 2.4vw, 1.5rem);
+  box-shadow: var(--shadow);
+}
+.card + .card {
+  margin-top: 1rem;
+}
+
+.intro {
+  border-left: 4px solid var(--accent);
+}
+.intro h2 {
+  margin: 0 0 0.4rem;
+  font-size: 1.15rem;
+}
+.intro p {
+  color: var(--text-dim);
+  max-width: 70ch;
+}
+.intro strong {
+  color: var(--text);
+}
+
+/* ── Buttons & controls ───────────────────────────────────────────────────── */
+.btn {
+  appearance: none;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 9px;
+  padding: 0.55rem 1rem;
+  border: 1px solid var(--border-strong);
+  background-color: var(--surface-soft);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  transition: background-color 0.15s, border-color 0.15s, transform 0.05s;
+}
+.btn:hover {
+  border-color: var(--accent);
+}
+.btn:active {
+  transform: translateY(1px);
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background-color: var(--btn-bg);
+  color: var(--btn-ink);
+  border-color: transparent;
+}
+.btn-primary:hover {
+  border-color: var(--btn-ink);
+}
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  margin-top: 0.9rem;
+}
+.compose {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-top: 0.9rem;
+}
+.compose label {
+  flex: 0 0 100%;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+.compose input[type="text"] {
+  flex: 1 1 16rem;
+  font: inherit;
+  padding: 0.55rem 0.7rem;
+  border-radius: 9px;
+  border: 1px solid var(--border-strong);
+  background-color: var(--bg-alt);
+  color: var(--text);
+}
+.compose input::placeholder {
+  color: var(--text-muted);
+}
+.hint {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+/* ── Conversation ─────────────────────────────────────────────────────────── */
+.wire-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+@media (max-width: 720px) {
+  .wire-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.pane-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+}
+.convo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 8rem;
+}
+.bubble {
+  max-width: 85%;
+  padding: 0.5rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background-color: var(--surface-soft);
+  animation: pop 0.18s ease-out;
+}
+.bubble .who {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-text);
+}
+.bubble .text {
+  color: var(--text);
+  word-break: break-word;
+}
+.bubble.from-alice {
+  align-self: flex-start;
+}
+.bubble.from-bob {
+  align-self: flex-end;
+  border-color: var(--border-strong);
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ── Wire view (what the network adversary sees) ──────────────────────────── */
+.wire {
+  background-color: var(--wire-bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 0.75rem;
+}
+.wire-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  font-size: 0.78rem;
+  color: #bcd0c6;
+  margin-bottom: 0.5rem;
+}
+.wire-meta b {
+  color: #eaf3ee;
+  font-weight: 600;
+}
+.hex {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: #9fdcc0;
+  word-break: break-all;
+  max-height: 8.5rem;
+  overflow: auto;
+}
+.wire-verdict {
+  margin-top: 0.6rem;
+  font-size: 0.85rem;
+  color: #bcd0c6;
+}
+.break-status {
+  margin-top: 0.6rem;
+  font-size: 0.9rem;
+  color: var(--text-dim);
+  min-height: 1.2rem;
+}
+.break-status:empty {
+  margin-top: 0;
+}
+
+/* ── Ratchet strip (the mechanism turning) ────────────────────────────────── */
+.ratchet {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  align-items: stretch;
+  margin-top: 0.4rem;
+  list-style: none;
+  padding: 0;
+}
+.rk-chip {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.35rem 0.5rem;
+  background-color: var(--surface-soft);
+  min-width: 4.6rem;
+  animation: pop 0.18s ease-out;
+}
+.rk-chip .rk-n {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  letter-spacing: 0.06em;
+}
+.rk-chip .rk-fp {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  color: var(--accent-text);
+}
+.rk-chip.dh-step {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.rk-chip .rk-tag {
+  display: block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--accent-text);
+  text-transform: uppercase;
+}
+
+/* ── Implant toggle + capture ─────────────────────────────────────────────── */
+.danger-zone {
+  border: 1px solid var(--border-strong);
+}
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.switch {
+  appearance: none;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  border-radius: 999px;
+  padding: 0.5rem 1rem 0.5rem 0.75rem;
+  border: 1px solid var(--border-strong);
+  background-color: var(--surface-soft);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  letter-spacing: 0.02em;
+}
+.switch .dot {
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 50%;
+  border: 2px solid var(--text-muted);
+}
+.switch[aria-pressed="true"] {
+  border-color: var(--alarm-line);
+  color: var(--alarm-text);
+}
+.switch[aria-pressed="true"] .dot {
+  background-color: var(--alarm-text);
+  border-color: var(--alarm-text);
+}
+.capture-scroll {
+  margin-top: 0.75rem;
+  max-height: 12rem;
+  overflow: auto;
+  border-radius: 8px;
+}
+.capture-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.capture-list li {
+  border: 1px solid var(--alarm-line);
+  border-left-width: 4px;
+  border-radius: 8px;
+  padding: 0.45rem 0.65rem;
+  background-color: color-mix(in oklab, var(--alarm-text) 8%, var(--surface));
+}
+.capture-list .cap-meta {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--alarm-text);
+}
+.capture-list .cap-text {
+  color: var(--text);
+  word-break: break-word;
+}
+.capture-empty {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin-top: 0.75rem;
+}
+
+/* ── Verdict separation ───────────────────────────────────────────────────── */
+.verdict-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+@media (max-width: 640px) {
+  .verdict-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.verdict {
+  border: 1px solid var(--border);
+  border-left-width: 5px;
+  border-radius: 12px;
+  padding: 0.9rem 1rem;
+  background-color: var(--surface);
+}
+.verdict.state-ok {
+  border-left-color: var(--ok-line);
+}
+.verdict.state-alarm {
+  border-left-color: var(--alarm-line);
+  background-color: color-mix(in oklab, var(--alarm-text) 7%, var(--surface));
+}
+.verdict .v-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.verdict .v-status {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin-top: 0.15rem;
+}
+.verdict.state-ok .v-status {
+  color: var(--ok-text);
+}
+.verdict.state-alarm .v-status {
+  color: var(--alarm-text);
+}
+.verdict .v-icon {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+.verdict .v-note {
+  margin-top: 0.35rem;
+  font-size: 0.88rem;
+  color: var(--text-dim);
+}
+.system-verdict {
+  margin-top: 1rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  padding: 0.9rem 1.1rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+}
+.system-verdict.state-ok {
+  border-color: var(--ok-line);
+  background-color: color-mix(in oklab, var(--ok-text) 8%, var(--surface));
+}
+.system-verdict.state-alarm {
+  border-color: var(--alarm-line);
+  background-color: color-mix(in oklab, var(--alarm-text) 10%, var(--surface));
+}
+.system-verdict .sv-icon {
+  font-size: 1.4rem;
+  line-height: 1.2;
+}
+.system-verdict .sv-title {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.system-verdict.state-ok .sv-title {
+  color: var(--ok-text);
+}
+.system-verdict.state-alarm .sv-title {
+  color: var(--alarm-text);
+}
+.system-verdict .sv-body {
+  color: var(--text-dim);
+  font-size: 0.92rem;
+  margin-top: 0.15rem;
+}
+
+/* ── Architecture timeline ────────────────────────────────────────────────── */
+.stack {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}
+.stack-row {
+  display: grid;
+  grid-template-columns: 9rem 1fr;
+  gap: 0.75rem;
+  align-items: start;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.7rem 0.85rem;
+  background-color: var(--surface-soft);
+}
+@media (max-width: 560px) {
+  .stack-row {
+    grid-template-columns: 1fr;
+  }
+}
+.stack-row .layer {
+  font-weight: 700;
+  color: var(--accent-text);
+}
+.stack-row .layer small {
+  display: block;
+  font-weight: 400;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+.stack-row .layer-note {
+  color: var(--text-dim);
+  font-size: 0.92rem;
+}
+.spof {
+  margin-top: 0.85rem;
+  border: 1px dashed var(--alarm-line);
+  border-radius: 10px;
+  padding: 0.7rem 0.9rem;
+  color: var(--text);
+  background-color: color-mix(in oklab, var(--alarm-text) 6%, var(--surface));
+}
+.spof b {
+  color: var(--alarm-text);
+}
+
+/* ── Details / progressive disclosure ─────────────────────────────────────── */
+details.more {
+  margin-top: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0 0.9rem;
+  background-color: var(--surface-soft);
+}
+details.more > summary {
+  cursor: pointer;
+  padding: 0.7rem 0;
+  font-weight: 600;
+  color: var(--accent-text);
+  list-style: none;
+}
+details.more > summary::-webkit-details-marker {
+  display: none;
+}
+details.more > summary::before {
+  content: "▸ ";
+  color: var(--accent-text);
+}
+details.more[open] > summary::before {
+  content: "▾ ";
+}
+details.more > div {
+  padding: 0 0 0.9rem;
+  color: var(--text-dim);
+}
+details.more code {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background-color: var(--bg-alt);
+  padding: 0.05rem 0.3rem;
+  border-radius: 5px;
+  color: var(--text);
+}
+
+/* ── Scoping / honesty ────────────────────────────────────────────────────── */
+.scoping {
+  border-left: 4px solid var(--accent);
+}
+.scoping h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+}
+.scoping ul {
+  margin: 0.3rem 0 0;
+  padding-left: 1.1rem;
+  color: var(--text-dim);
+}
+.scoping li {
+  margin: 0.25rem 0;
+}
+.scoping b {
+  color: var(--text);
+}
+
+/* ── Footer ───────────────────────────────────────────────────────────────── */
+.scripture-footer {
+  max-width: 62rem;
+  margin: 2.5rem auto 0;
+  padding: 1.5rem clamp(1rem, 4vw, 2rem) 2rem;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+.scripture-footer a {
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.scripture-footer .scripture {
+  color: var(--text-dim);
+  margin-top: 0.6rem;
+  font-style: italic;
+}
