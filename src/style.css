@@ -126,7 +126,6 @@ body {
 }
 
 /* ── Hero ─────────────────────────────────────────────────────────────────── */
-/* BEGIN cl-hero standard — managed, keep in sync across fleet */
 .cl-hero {
   display: flex;
   align-items: flex-start;
@@ -188,8 +187,11 @@ body {
     flex-basis: auto;
     width: 100%;
   }
+  .cl-hero-main {
+    flex-basis: auto;
+    min-width: 0;
+  }
 }
-/* END cl-hero standard */
 
 /* ── Sections & panels ────────────────────────────────────────────────────── */
 .section {
@@ -255,6 +257,7 @@ body {
   cursor: pointer;
   border-radius: 9px;
   padding: 0.55rem 1rem;
+  min-height: 44px; /* touch target */
   border: 1px solid var(--border-strong);
   background-color: var(--surface-soft);
   color: var(--text);
@@ -301,8 +304,11 @@ body {
 }
 .compose input[type="text"] {
   flex: 1 1 16rem;
+  min-width: 0; /* allow the field to shrink below its flex-basis at 360px */
   font: inherit;
+  font-size: 16px; /* prevents iOS auto-zoom on focus */
   padding: 0.55rem 0.7rem;
+  min-height: 44px; /* touch target */
   border-radius: 9px;
   border: 1px solid var(--border-strong);
   background-color: var(--bg-alt);
@@ -530,6 +536,7 @@ body {
   cursor: pointer;
   border-radius: 999px;
   padding: 0.5rem 1rem 0.5rem 0.75rem;
+  min-height: 44px; /* touch target */
   border: 1px solid var(--border-strong);
   background-color: var(--surface-soft);
   color: var(--text);
