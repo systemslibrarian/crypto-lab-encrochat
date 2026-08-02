@@ -6,7 +6,8 @@ const BASE = "/crypto-lab-encrochat/";
 /**
  * E2E accessibility gate. Tests run against the production build served by
  * `vite preview`, so what passes here is what actually ships to Pages.
- * Run `npm run build` first (CI does).
+ * The build runs as part of the webServer command, so a run always tests the
+ * current source rather than whatever bundle happens to be sitting in dist/.
  */
 export default defineConfig({
   testDir: "./e2e",
@@ -21,7 +22,10 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: `npm run preview -- --port ${PORT} --strictPort`,
+    // Build first: `vite preview` only serves the existing dist/, so without
+    // this a broken build leaves the last good bundle in place and the suite
+    // passes green against source that no longer compiles.
+    command: `npm run build && npm run preview -- --port ${PORT} --strictPort`,
     port: PORT,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
