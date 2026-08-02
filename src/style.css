@@ -17,6 +17,7 @@
   --accent-text: #83bda6; /* accent as body text: ~5.4:1 on --surface */
   --border: #2a3d35;
   --border-strong: #3a5449;
+  --control-border: #567c6c; /* text-field boundary: >=3:1 on --surface and --bg-alt (SC 1.4.11) */
 
   --ok-text: #71cf9c; /* ~6:1 on --surface */
   --ok-line: #3f8f66;
@@ -45,6 +46,7 @@
   --accent-text: #276048; /* accent as body text: ~5.6:1 on white */
   --border: #cddbd4;
   --border-strong: #a9c1b6;
+  --control-border: #6b8478; /* text-field boundary: >=3:1 on --surface and --bg-alt (SC 1.4.11) */
 
   --ok-text: #1c7a4b; /* ~4.9:1 on white */
   --ok-line: #2f8f5e;
@@ -310,7 +312,7 @@ body {
   padding: 0.55rem 0.7rem;
   min-height: 44px; /* touch target */
   border-radius: 9px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--control-border);
   background-color: var(--bg-alt);
   color: var(--text);
 }

@@ -73,6 +73,86 @@ async function scan(page: Page): Promise<void> {
   ).toEqual([]);
 }
 
+/**
+ * SC 1.4.11 (non-text contrast): the boundary of every text-entry control must
+ * reach 3:1 against the adjacent surface AND against the field's own fill, in
+ * both themes. Axe does not flag border-vs-surface, so this is asserted
+ * directly from rendered computed styles, compositing translucent colors over
+ * the real ancestor backdrop.
+ */
+async function minBorderContrast(page: Page, selector: string): Promise<number> {
+  return page.evaluate((sel) => {
+    const el = document.querySelector<HTMLElement>(sel);
+    if (!el) throw new Error(`no element: ${sel}`);
+    type C = { r: number; g: number; b: number; a: number };
+    const parse = (s: string): C => {
+      const m = s.match(/rgba?\(([^)]+)\)/);
+      if (!m) return { r: 0, g: 0, b: 0, a: 0 };
+      const p = m[1].split(/[,\s/]+/).map(parseFloat);
+      return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 };
+    };
+    const over = (fg: C, bg: C): C => {
+      const a = fg.a + bg.a * (1 - fg.a);
+      return {
+        r: (fg.r * fg.a + bg.r * bg.a * (1 - fg.a)) / a,
+        g: (fg.g * fg.a + bg.g * bg.a * (1 - fg.a)) / a,
+        b: (fg.b * fg.a + bg.b * bg.a * (1 - fg.a)) / a,
+        a,
+      };
+    };
+    const backdrop = (start: Element | null): C => {
+      const stack: C[] = [];
+      for (let n = start; n; n = n.parentElement) {
+        const c = parse(getComputedStyle(n).backgroundColor);
+        if (c.a > 0) {
+          stack.push(c);
+          if (c.a >= 1) break;
+        }
+      }
+      let out: C = { r: 255, g: 255, b: 255, a: 1 };
+      for (let i = stack.length - 1; i >= 0; i--) out = over(stack[i], out);
+      return out;
+    };
+    const lum = (c: C) => {
+      const f = (v: number) => {
+        v /= 255;
+        return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+      };
+      return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+    };
+    const ratio = (a: C, b: C) => {
+      const [hi, lo] = lum(a) > lum(b) ? [lum(a), lum(b)] : [lum(b), lum(a)];
+      return (hi + 0.05) / (lo + 0.05);
+    };
+    const cs = getComputedStyle(el);
+    const outside = backdrop(el.parentElement);
+    const fillRaw = parse(cs.backgroundColor);
+    const fill = fillRaw.a > 0 ? over(fillRaw, outside) : outside;
+    const border = over(over(parse(cs.borderTopColor), fill), outside);
+    return Math.min(ratio(border, outside), ratio(border, fill));
+  }, selector);
+}
+
+const TEXT_CONTROLS = ["#custom-msg"];
+
+test("text-entry control borders reach 3:1 — dark theme", async ({ page }) => {
+  await page.goto(".");
+  await page.waitForSelector("#custom-msg");
+  for (const sel of TEXT_CONTROLS) {
+    expect(await minBorderContrast(page, sel), `${sel} (dark)`).toBeGreaterThanOrEqual(3);
+  }
+});
+
+test("text-entry control borders reach 3:1 — light theme", async ({ page }) => {
+  await page.goto(".");
+  await page.waitForSelector("#custom-msg");
+  await page.locator("#cl-theme-toggle").click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  for (const sel of TEXT_CONTROLS) {
+    expect(await minBorderContrast(page, sel), `${sel} (light)`).toBeGreaterThanOrEqual(3);
+  }
+});
+
 test("no WCAG A/AA violations — dark theme", async ({ page }) => {
   await page.goto(".");
   await driveDemos(page);
