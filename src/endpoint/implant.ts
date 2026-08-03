@@ -143,8 +143,14 @@ export function assessSystem(e: Evidence): SystemVerdict {
   } else if (encryption === "compromised") {
     headline = "A message failed authentication — the encryption result is not sound this session.";
   } else if (e.endpointCompromised) {
+    // "Encryption held" is itself an evidence claim, so it may only be made once
+    // a tag has actually verified. With an implant deployed but nothing sent, the
+    // encryption axis is `untested`, and a headline asserting it held would
+    // contradict the very panel next to it.
     headline =
-      "Encryption held; the endpoint did not. Plaintext is read at the device, before it is ever encrypted.";
+      encryption === "sound"
+        ? "Encryption held; the endpoint did not. Plaintext is read at the device, before it is ever encrypted."
+        : "No message has been sent yet, so the encryption is untested — but an implant already reads plaintext at the device.";
   } else {
     headline = "Every delivered message authenticated, and no endpoint compromise is modelled.";
   }

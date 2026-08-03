@@ -95,9 +95,11 @@ at "is the crypto strong?" misses where real systems actually fail.
 ```bash
 npm install
 npm run dev       # http://localhost:5173/crypto-lab-encrochat/
-npm test          # unit tests + spec KATs
-npm run build     # typecheck + production build
-npm run test:a11y # WCAG 2.1 AA gate (both themes) against the production build
+npm test            # unit tests + spec KATs
+npm run build       # typecheck + production build
+npm run test:e2e    # browser gate: functional claims + WCAG 2.1 AA, both themes
+npm run test:a11y   # just the accessibility half
+npm run test:claims # just the functional half
 ```
 
 ## Related Demos
@@ -108,7 +110,7 @@ npm run test:a11y # WCAG 2.1 AA gate (both themes) against the production build
 
 ## Build & Verify
 
-- **40 unit tests** (Vitest), colocated as `src/**/*.test.ts`, run in CI before deploy.
+- **41 unit tests** (Vitest), colocated as `src/**/*.test.ts`, run in CI before deploy.
 - **7 spec known-answer tests** pin the primitives to their standards:
   - `src/crypto/primitives.test.ts` — HMAC-SHA256 (RFC 4231 ×2), HKDF-SHA256
     (RFC 5869 ×2), AES-256-GCM (NIST CAVP vector).
@@ -122,8 +124,17 @@ npm run test:a11y # WCAG 2.1 AA gate (both themes) against the production build
   verdicts follow observed evidence (untested → sound → alarm).
 - `src/endpoint/implant.test.ts` proves the thesis: encryption sound **and** endpoint
   compromised leaks plaintext, and the system verdict tracks integrity.
+- **Functional browser gate:** `e2e/claims.spec.ts` drives the production build in
+  Chromium and asserts the page's own output — the packet's byte segments summing to
+  the total it announces (and the ciphertext length matching the UTF-8 plaintext), the
+  ratchet strip's `⟳ DH step` / `chain +1` labels matching the DH key in the header
+  that message actually carried, the encryption verdict's `N of M` counter equalling
+  the messages on screen, both failure paths (keyless wiretap, forged packet) reaching
+  their failure state *and* stating why, and the implant harvesting plaintext at both
+  ends while the wire's byte counts are unchanged.
 - **Accessibility gate:** `@axe-core/playwright` scans the production build for zero
-  WCAG 2.1 A/AA violations in **both** themes; the GitHub Pages deploy is blocked on it.
+  WCAG 2.1 A/AA violations in **both** themes; the GitHub Pages deploy is blocked on
+  both browser gates.
 
 ## Performance
 

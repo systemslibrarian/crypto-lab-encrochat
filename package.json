@@ -10,7 +10,9 @@
     "test:watch": "vitest",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test:a11y": "playwright test"
+    "test:e2e": "playwright test",
+    "test:a11y": "playwright test e2e/a11y.spec.ts",
+    "test:claims": "playwright test e2e/claims.spec.ts"
   },
   "dependencies": {
     "@noble/curves": "^1.6.0"

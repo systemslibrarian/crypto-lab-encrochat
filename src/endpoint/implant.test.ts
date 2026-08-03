@@ -91,6 +91,19 @@ describe("Verdict separation is derived from observed evidence, not asserted", (
     expect(v.headline).toMatch(/endpoint did not/i);
   });
 
+  it("does not claim the encryption held before any message has been authenticated", () => {
+    // Regression: deploying the implant on a fresh session used to print
+    // "Encryption held; the endpoint did not." while the encryption panel beside
+    // it read NOT YET TESTED — a headline contradicting its own computed axis.
+    const v = assessSystem({ messagesVerified: 0, verificationFailures: 0, endpointCompromised: true });
+    expect(v.encryption).toBe("untested");
+    expect(v.system).toBe("compromised");
+    expect(v.systemSignal).toBe("alarm");
+    expect(v.headline).not.toMatch(/encryption held/i);
+    expect(v.headline).toMatch(/untested/i);
+    expect(v.headline).toMatch(/implant/i);
+  });
+
   it("the weakest link decides: a verification failure is system-compromised", () => {
     const v = assessSystem({ messagesVerified: 2, verificationFailures: 1, endpointCompromised: false });
     expect(v.encryption).toBe("compromised");
