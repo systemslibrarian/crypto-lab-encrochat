@@ -16,8 +16,12 @@
   --accent: #5a8f7b; /* catalog accent — borders / large UI only */
   --accent-text: #83bda6; /* accent as body text: ~5.4:1 on --surface */
   --border: #2a3d35;
-  --border-strong: #3a5449;
-  --control-border: #567c6c; /* text-field boundary: >=3:1 on --surface and --bg-alt (SC 1.4.11) */
+  --border-strong: #3a5449; /* SURFACE divider only — 2.01:1 on --surface, never a control edge */
+  /* The boundary of every interactive control (SC 1.4.11). Measured against
+     each surface a control actually lands on: --surface 3.56:1, --surface-soft
+     3.13:1 (the tightest — it is .btn's own fill, and also the panel the two
+     attack buttons sit on inside details.more) and --bg-alt 3.81:1. */
+  --control-border: #567c6c;
 
   --ok-text: #71cf9c; /* ~6:1 on --surface */
   --ok-line: #3f8f66;
@@ -45,8 +49,11 @@
   --accent: #3a7a61;
   --accent-text: #276048; /* accent as body text: ~5.6:1 on white */
   --border: #cddbd4;
-  --border-strong: #a9c1b6;
-  --control-border: #6b8478; /* text-field boundary: >=3:1 on --surface and --bg-alt (SC 1.4.11) */
+  --border-strong: #a9c1b6; /* SURFACE divider only — 1.91:1 on --surface, never a control edge */
+  /* The boundary of every interactive control (SC 1.4.11). Measured against
+     each surface a control actually lands on: --surface 4.04:1, --surface-soft
+     3.67:1, --bg-alt 3.33:1 (the tightest). */
+  --control-border: #6b8478;
 
   --ok-text: #1c7a4b; /* ~4.9:1 on white */
   --ok-line: #2f8f5e;
@@ -62,11 +69,13 @@
   color-scheme: light;
 }
 
-/* html owns its own background-color (longhand — axe/WebKit miss the shorthand). */
+/* html owns its own background-color (longhand — axe/WebKit miss the shorthand).
+   One rule covers both themes: `--bg` is redefined on `:root[data-theme="light"]`
+   above, so this resolves per theme on its own. A second rule reading
+   `:root[data-theme="light"] html { … }` used to sit here and matched nothing —
+   `:root` IS `<html>`, and no document has an `<html>` inside an `<html>` — so it
+   read as theme handling that was never happening. */
 html {
-  background-color: var(--bg);
-}
-:root[data-theme="light"] html {
   background-color: var(--bg);
 }
 
@@ -260,7 +269,12 @@ body {
   border-radius: 9px;
   padding: 0.55rem 1rem;
   min-height: 44px; /* touch target */
-  border: 1px solid var(--border-strong);
+  /* --control-border, not --border-strong. This button's fill (--surface-soft)
+     is within 1.14:1 of the card behind it, so the border is the ONLY thing
+     delineating the control, and --border-strong is a surface divider that
+     measured 1.77:1 against that fill in dark and 1.73:1 in light — a 1.4.11
+     failure on every button on the page. See the token definition. */
+  border: 1px solid var(--control-border);
   background-color: var(--surface-soft);
   color: var(--text);
   display: inline-flex;
@@ -539,7 +553,11 @@ body {
   border-radius: 999px;
   padding: 0.5rem 1rem 0.5rem 0.75rem;
   min-height: 44px; /* touch target */
-  border: 1px solid var(--border-strong);
+  /* Same reasoning as .btn: the fill matches the card to within 1.14:1, so the
+     border carries the whole boundary and must be the control token. When
+     pressed, --alarm-line takes over below and measures 3.38:1 dark / 5.37:1
+     light against the same fill. */
+  border: 1px solid var(--control-border);
   background-color: var(--surface-soft);
   color: var(--text);
   display: inline-flex;
