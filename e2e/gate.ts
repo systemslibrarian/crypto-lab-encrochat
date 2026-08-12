@@ -636,8 +636,27 @@ export function reportCollected(): void {
 async function expectScrollersReachableSoft(page: Page, label: string): Promise<void> {
   if (!COLLECTING) return expectScrollersReachable(page, label);
   try {
+    await expectScrollersReachable(page, label);
+  } catch (e) {
+    record(String(e).slice(0, 900));
+  }
+}
+
+/**
+ * The 1.4.11 ratchet, soft-wrapped the same way as every other oracle here.
+ *
+ * This wrapper is the repair of a dead oracle rather than a refactor.
+ * `expectNoNewNonTextFailures` used to be called from ONE place: the body of
+ * `expectScrollersReachableSoft`, AFTER its `if (!COLLECTING) return …` guard.
+ * So in a strict run — which is every run in CI and every run anyone reads as a
+ * pass — the guard returned first and `nontext.ts` never executed at all. That
+ * is why this repo's `nontext-baseline.ts` was empty: not because there was
+ * nothing to find, but because nothing had ever looked.
+ */
+async function expectNoNewNonTextFailuresSoft(page: Page, label: string): Promise<void> {
+  if (!COLLECTING) return expectNoNewNonTextFailures(page, label);
+  try {
     await expectNoNewNonTextFailures(page, label);
-  await expectScrollersReachable(page, label);
   } catch (e) {
     record(String(e).slice(0, 900));
   }
@@ -743,14 +762,33 @@ export function expectBaselineNotStale(): void {
 export async function scan(page: Page, label: string): Promise<void> {
   await settle(page);
   await expectNotBlank(page, label);
-  const results = await new AxeBuilder({ page })
-    .withTags(TAGS)
-    // These four are axe "best-practice" rules rather than WCAG-tagged ones, so
-    // `withTags` alone does not run them. This page is exactly the shape they
-    // catch: a shared sticky <header role="banner"> above a <main id="app"> that
-    // `main.ts` fills with a second <header class="cl-hero">, which itself
-    // contains an <aside class="cl-hero-why"> — and none of the four was enabled
-    // before.
+  // TWO axe runs, deliberately, and this is not a style choice.
+  //
+  // `AxeBuilder.withTags()` and `AxeBuilder.withRules()` both write the same
+  // `options.runOnly` field, so the second call SILENTLY REPLACES the first —
+  // the axe-core/playwright source says so in as many words on `withRules`
+  // ("Cannot be used with AxeBuilder#withTags"). Chained as
+  // `.withTags(TAGS).withRules([...4 landmark rules])`, which is what stood
+  // here, axe therefore ran those FOUR best-practice rules and NOT ONE WCAG
+  // RULE. A green result meant "no duplicate landmarks" and nothing whatsoever
+  // about WCAG A/AA, while reading exactly like a full pass.
+  //
+  // That is confirmed by experiment, not by reading. `<html lang="en">` was
+  // changed to `<html>` and the full dark-theme drive run twice against the
+  // identical page: the chained form PASSED GREEN; the merged form below failed
+  // on `html-has-lang` (SC 3.1.1, tagged `wcag2a`). Same page, same drive; the
+  // only difference is these two `analyze()` calls. For scale, `withTags(TAGS)`
+  // selects 69 of axe-core 4.12's 105 rule definitions.
+  //
+  // Running the two sets separately and merging is the only way to have both.
+  // The landmark four are still wanted because they are best-practice rather
+  // than WCAG-tagged, so `withTags` alone does not reach them, and this page is
+  // exactly the shape they catch: a shared sticky <header role="banner"> above
+  // a <main id="app"> that `main.ts` fills with a second
+  // <header class="cl-hero">, which itself contains an
+  // <aside class="cl-hero-why">.
+  const wcag = await new AxeBuilder({ page }).withTags(TAGS).analyze();
+  const landmarks = await new AxeBuilder({ page })
     .withRules([
       'landmark-no-duplicate-banner',
       'landmark-unique',
@@ -758,6 +796,10 @@ export async function scan(page: Page, label: string): Promise<void> {
       'landmark-complementary-is-top-level',
     ])
     .analyze();
+  const results = {
+    violations: [...wcag.violations, ...landmarks.violations],
+    incomplete: [...wcag.incomplete, ...landmarks.incomplete],
+  };
 
   const violations = results.violations.map((v) => ({
     state: label,
@@ -787,6 +829,7 @@ export async function scan(page: Page, label: string): Promise<void> {
   );
   softExpect(undelineated, `control boundaries under 3:1 (SC 1.4.11) in state: ${label}`, []);
 
+  await expectNoNewNonTextFailuresSoft(page, label);
   await expectScrollersReachableSoft(page, label);
   await expectNoHorizontalOverflowSoft(page, label);
 }
