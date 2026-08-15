@@ -1,5 +1,12 @@
 import { expect, test } from '@playwright/test';
-import { boot, driveAllStates, NARROW, reportCollected, watchPageErrors } from './gate';
+import {
+  boot,
+  driveAllStates,
+  expectBaselineNotStale,
+  NARROW,
+  reportCollected,
+  watchPageErrors,
+} from './gate';
 
 /**
  * WCAG A/AA regression gate.
@@ -40,6 +47,7 @@ for (const theme of ['dark', 'light'] as const) {
     await driveAllStates(page, theme);
     expect(errors, errors.join('\n')).toEqual([]);
     reportCollected();
+    expectBaselineNotStale();
   });
 
   test(`no WCAG A/AA violations in ${theme} theme at 380px`, async ({ page }) => {
@@ -50,5 +58,6 @@ for (const theme of ['dark', 'light'] as const) {
     await driveAllStates(page, `${theme} @380px`);
     expect(errors, errors.join('\n')).toEqual([]);
     reportCollected();
+    expectBaselineNotStale();
   });
 }
