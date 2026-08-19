@@ -15,7 +15,7 @@
     "test:claims": "playwright test e2e/claims.spec.ts"
   },
   "dependencies": {
-    "@noble/curves": "^1.6.0"
+    "@noble/curves": "^2.3.0"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
