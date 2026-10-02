@@ -1,3 +1,4 @@
+import { architectureView } from './architecture-view';
 import "./style.css";
 import { clear, el } from "./dom";
 import { Session, type MessageEvent, type WireView } from "./session";
@@ -381,72 +382,9 @@ function exhibitC(): HTMLElement {
 
 /* ── Exhibit D: the architecture that was the real single point of failure ── */
 function exhibitD(): HTMLElement {
-  const section = el("section", { class: "section" });
-  section.append(
-    el(
-      "div",
-      { class: "section-head" },
-      el("span", { class: "section-kicker", text: "Exhibit D" }),
-      el("h2", { class: "section-title", text: "Why one endpoint compromise scaled to all of them" }),
-    ),
-    el("p", {
-      class: "section-lede",
-      text: "Encrochat was a vertically integrated stack: one operation controlled the hardware, the servers, and the key infrastructure. That concentration is the architectural lesson — the crypto was never the weakest link, the trust boundary was.",
-    }),
-  );
-
-  const rows: Array<[string, string, string]> = [
-    ["Device / vendor", "custom handset + OS", "The vendor built the phones and the messaging app, so the vendor decided what ran on the endpoint — the one place plaintext is readable."],
-    ["Service provider", "servers + updates", "Message routing and software updates flowed through infrastructure the operation ran, a single channel reaching every device at once."],
-    ["PKI / key distribution", "identities + trust roots", "Key material and trust anchors were issued centrally, so the users' notion of 'who am I talking to' rested on one authority."],
-  ];
-
-  const stack = el("div", { class: "stack" });
-  for (const [layer, sub, note] of rows) {
-    stack.append(
-      el(
-        "div",
-        { class: "stack-row" },
-        el("div", { class: "layer" }, document.createTextNode(layer), el("small", { text: sub })),
-        el("div", { class: "layer-note", text: note }),
-      ),
-    );
-  }
-
-  const card = el("section", { class: "card" });
-  card.append(
-    stack,
-    el(
-      "div",
-      { class: "spof" },
-      el("span", { "aria-hidden": "true", text: "⚠ " }),
-      "Single point of failure: ",
-      el("b", { text: "when one entity owns device, service, and PKI, compromising the provider compromises every endpoint" }),
-      " — no per-user attack required. The Double Ratchet held on all of them and it changed nothing.",
-    ),
-    scopingDetails(),
-  );
-  section.append(card);
-  return section;
+  return architectureView();
 }
 
-function scopingDetails(): HTMLElement {
-  const d = el("details", { class: "more" });
-  d.append(
-    el("summary", { text: "For the expert: what this model does and does not include" }),
-    el(
-      "div",
-      {},
-      el("p", {
-        text: "This lab models the principle, never a method. It contains no operational or acquisition detail for compromising an endpoint — that is out of scope by design. The implant here is a passive reader of application plaintext, which is sufficient to make the point and nothing more.",
-      }),
-      el("p", {
-        text: "It is an in-order Double Ratchet teaching subset: session setup seeds the initial root key from a single X25519 handshake for clarity (the full X3DH agreement is the sibling lab crypto-lab-x3dh-wire), and out-of-order / skipped-message handling is omitted. Every production session draws fresh random keys, so no key or IV is reused; a rejected packet commits no ratchet state.",
-      }),
-    ),
-  );
-  return d;
-}
 
 function scoping(): HTMLElement {
   const card = el("section", { class: "card scoping" });
@@ -675,3 +613,4 @@ async function main(): Promise<void> {
 }
 
 void main();
+
