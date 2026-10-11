@@ -3,7 +3,7 @@
  * Double Ratchet uses for its asymmetric ("DH") step. Backed by the audited
  * `@noble/curves`; pinned against the RFC 7748 test vectors in `x25519.test.ts`.
  */
-import { x25519 } from "@noble/curves/ed25519";
+import { x25519 } from "@noble/curves/ed25519.js";
 import { randomBytes } from "./primitives";
 
 export interface KeyPair {

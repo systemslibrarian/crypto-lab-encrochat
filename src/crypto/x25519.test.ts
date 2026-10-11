@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { x25519 } from "@noble/curves/ed25519";
+import { x25519 } from "@noble/curves/ed25519.js";
 import { fromHex, toHex } from "./primitives";
 import { dh, generateKeyPair } from "./x25519";
 
@@ -27,6 +27,44 @@ describe("X25519 KAT (RFC 7748 §5.2)", () => {
 });
 
 describe("X25519 DH agreement", () => {
+  it("derives the published Alice/Bob keys and shared secret through the wrappers (RFC 7748 §6.1)", () => {
+    const aliceSeed = fromHex("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a");
+    const bobSeed = fromHex("5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb");
+    const before = [toHex(aliceSeed), toHex(bobSeed)];
+    const alice = generateKeyPair(aliceSeed);
+    const bob = generateKeyPair(bobSeed);
+    expect(toHex(alice.publicKey)).toBe("8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a");
+    expect(toHex(bob.publicKey)).toBe("de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f");
+    const shared = "4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742";
+    expect(toHex(dh(alice, bob.publicKey))).toBe(shared);
+    expect(toHex(dh(bob, alice.publicKey))).toBe(shared);
+    expect([toHex(aliceSeed), toHex(bobSeed)]).toEqual(before);
+    expect([toHex(alice.privateKey), toHex(bob.privateKey)]).toEqual(before);
+  });
+
+  it("rejects malformed secret and peer key lengths", () => {
+    const alice = generateKeyPair(new Uint8Array(32).fill(3));
+    for (const length of [0, 31, 33]) {
+      expect(() => generateKeyPair(new Uint8Array(length))).toThrow();
+      expect(() => dh(alice, new Uint8Array(length))).toThrow();
+    }
+  });
+
+  it("retains low-order peer rejection without damaging a subsequent valid agreement", () => {
+    const alice = generateKeyPair(fromHex("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a"));
+    const before = [toHex(alice.privateKey), toHex(alice.publicKey)];
+    // RFC 7748 §6.1 permits rejecting the all-zero shared secret. Noble
+    // rejects low-order peers; do not turn that failure into ratchet key data.
+    for (const u of [0, 1]) {
+      const lowOrder = new Uint8Array(32);
+      lowOrder[0] = u;
+      expect(() => dh(alice, lowOrder)).toThrow();
+    }
+    const bobPublic = fromHex("de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f");
+    expect(toHex(dh(alice, bobPublic))).toBe("4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742");
+    expect([toHex(alice.privateKey), toHex(alice.publicKey)]).toEqual(before);
+  });
+
   it("both parties derive the same shared secret", () => {
     const a = generateKeyPair();
     const b = generateKeyPair();
