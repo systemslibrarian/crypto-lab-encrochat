@@ -50,8 +50,7 @@ Encrochat"* (eprint 2026/1319). **Not production crypto.**
    whether an implant is deployed), starting neutral rather than green. The system
    banner tracks the weakest link, so sound encryption on a compromised device reads
    as an alarm, not a success.
-5. **Why one endpoint compromise scaled to all of them** — the vertically integrated
-   stack (device vendor + service provider + PKI) as the real single point of failure.
+5. **When does one compromise reach every device?** — choose compromised vendor, update, identity, or routing authorities; compare shared administration, renamed operators, and independently pinned update approvals. Real P-256 signatures gate a modelled installation; AES-GCM probes and the existing passive implant show plaintext capture despite successful authentication tags. An existing implant on Alice survives operator separation. This is an illustrative counterfactual, not a historical update-protocol reconstruction. See [architecture details](docs/architecture-probe.md).
 
 ## When to Use It
 
@@ -76,9 +75,7 @@ The lab is a catalogue of the failure it teaches:
 
 - **Compromised endpoint → total loss of confidentiality.** Plaintext is read before
   encryption and after decryption; forward secrecy and a perfect cipher are irrelevant.
-- **Concentrated trust → compromise scales.** When one entity owns the hardware, the
-  servers, and the PKI, compromising the provider compromises every endpoint at once —
-  no per-user attack required.
+- **Concentrated trust → compromise scales.** Shared administrative access can give one compromise every signing authority. Separate operator names do not contain that compromise unless independently enforced permissions change. The exhibit requires both vendor and update-approval signatures; routing-server control alone cannot authorize installation in independent mode.
 - **Misreading the guarantee.** "End-to-end encrypted" describes the channel. It says
   nothing about who controls the ends.
 
@@ -110,7 +107,7 @@ npm run test:claims # just the functional half
 
 ## Build & Verify
 
-- **41 unit tests** (Vitest), colocated as `src/**/*.test.ts`, run in CI before deploy.
+- **Unit tests** (Vitest), colocated as `src/**/*.test.ts`, run in CI before deploy.
 - **7 spec known-answer tests** pin the primitives to their standards:
   - `src/crypto/primitives.test.ts` — HMAC-SHA256 (RFC 4231 ×2), HKDF-SHA256
     (RFC 5869 ×2), AES-256-GCM (NIST CAVP vector).
@@ -149,3 +146,4 @@ CI, so no specific latency figure is claimed here.
 *Part of the [Crypto Lab](https://crypto-lab.systemslibrarian.dev/) suite.*
 
 *"So whether you eat or drink or whatever you do, do it all for the glory of God." — 1 Corinthians 10:31*
+

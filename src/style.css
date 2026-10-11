@@ -846,3 +846,9 @@ details.more code {
   margin-top: 0.6rem;
   font-style: italic;
 }
+
+
+#architecture-lab select { max-width: 100%; white-space: normal; }
+#architecture-lab label { display: block; margin-bottom: 0.5rem; }
+#architecture-lab .controls { flex-wrap: wrap; margin-block: 1rem; }
+#architecture-lab button[aria-pressed='true'] { border-width: 3px; }

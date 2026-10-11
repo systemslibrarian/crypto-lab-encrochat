@@ -520,3 +520,31 @@ test("reset keeps a deployed implant deployed, and the verdicts follow", async (
   expect(v.systemTitle).toBe("SYSTEM COMPROMISED");
   expect(v.systemClass).toContain("state-alarm");
 });
+
+
+test('operator separation requires independent approvals, and cannot cure an implant', async ({ page }) => {
+  await page.goto('.');
+  const lab = page.locator('#architecture-lab');
+  const result = lab.locator('#architecture-result');
+  await lab.getByRole('button', { name: 'Device vendor signer', exact: true }).click();
+  await lab.locator('#architecture-run').click();
+  await expect(result).toContainText('Attacker update: BLOCKED');
+  await expect(result).toContainText('plaintext not captured');
+  await lab.getByRole('button', { name: 'Update approval signer', exact: true }).click();
+  await expect(result).toContainText('Previous results retired');
+  await lab.locator('#architecture-run').click();
+  await expect(result).toContainText('Attacker update: INSTALLED');
+  await expect(result).toContainText('alice: plaintext CAPTURED; message tag VERIFIED');
+  await expect(result).toContainText('bob: plaintext CAPTURED; message tag VERIFIED');
+  await lab.getByRole('button', { name: 'Update approval signer — compromised', exact: true }).click();
+  await lab.locator('select').selectOption('renamed');
+  await lab.locator('#architecture-run').click();
+  await expect(result).toContainText('Attacker update: INSTALLED');
+  await lab.locator('select').selectOption('independent');
+  await lab.getByRole('button', { name: 'Existing implant on Alice', exact: true }).click();
+  await lab.locator('#architecture-run').click();
+  await expect(result).toContainText('Attacker update: BLOCKED');
+  await expect(result).toContainText('alice: plaintext CAPTURED; message tag VERIFIED');
+  await expect(result).toContainText('bob: plaintext not captured');
+  await expect(result).toContainText('Separating operators cannot remove an implant');
+});
