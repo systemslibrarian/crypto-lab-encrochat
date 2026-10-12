@@ -108,10 +108,11 @@ npm run test:claims # just the functional half
 ## Build & Verify
 
 - **Unit tests** (Vitest), colocated as `src/**/*.test.ts`, run in CI before deploy.
-- **7 spec known-answer tests** pin the primitives to their standards:
+- **8 spec known-answer tests** pin the primitives to their standards:
   - `src/crypto/primitives.test.ts` — HMAC-SHA256 (RFC 4231 ×2), HKDF-SHA256
     (RFC 5869 ×2), AES-256-GCM (NIST CAVP vector).
-  - `src/crypto/x25519.test.ts` — X25519 (RFC 7748 §5.2 ×2).
+  - `src/crypto/x25519.test.ts` — X25519 (RFC 7748 §5.2 ×2) and the published
+    Alice/Bob key agreement (RFC 7748 §6.1), plus malformed/low-order peer rejection.
 - `src/crypto/double-ratchet.test.ts` covers round-trips across DH ratchet steps,
   on-wire opacity, forward secrecy, the canonical wire codec, and the **transactional
   receive** property: a forged packet is rejected and leaves the ratchet byte-for-byte
