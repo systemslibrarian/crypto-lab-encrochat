@@ -2,10 +2,14 @@
  * Low-level cryptographic primitives — thin, honest wrappers over the platform.
  *
  * Everything here is REAL crypto: HMAC-SHA256, HKDF-SHA256 and AES-256-GCM come
- * straight from the platform WebCrypto (`crypto.subtle`), which is the same
- * audited implementation the browser ships and Node exposes. X25519 comes from
- * the audited `@noble/curves`. Nothing is simulated. The known-answer tests in
- * `primitives.test.ts` and `x25519.test.ts` pin these against the RFC vectors.
+ * straight from the platform WebCrypto (`crypto.subtle`), the same
+ * implementation the browser ships and Node exposes. X25519 comes from
+ * `@noble/curves`, whose latest independent audit is "at version 2.3.0, in Aug
+ * 2026, by [Trail of Bits]" with scope "everything" — this lab pins ^2.4.0, so
+ * the version shipped here is one release past what that audit covered.
+ * Nothing is simulated. The known-answer tests in `primitives.test.ts` and
+ * `x25519.test.ts` pin these against the RFC vectors, which is the check that
+ * does not depend on anyone's audit.
  */
 
 /**

@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import readme from "../../node_modules/@noble/curves/README.md?raw";
+import pkg from "../../package.json";
+import primitivesSource from "./primitives.ts?raw";
 import { x25519 } from "@noble/curves/ed25519.js";
 import { fromHex, toHex } from "./primitives";
 import { dh, generateKeyPair } from "./x25519";
@@ -76,5 +79,28 @@ describe("X25519 DH agreement", () => {
     expect(toHex(generateKeyPair(seed).publicKey)).toBe(
       toHex(generateKeyPair(seed).publicKey),
     );
+  });
+});
+
+// The audit claim attached to the library this file wraps.
+//
+// primitives.ts called @noble/curves simply "the audited `@noble/curves`" with
+// no version. The library's README records its latest independent audit as "at
+// version 2.3.0, in Aug 2026, by [Trail of Bits]", scope "everything"; this lab
+// pins ^2.4.0, a release past that. Read from the installed package so an
+// upgrade that changes the record fails here.
+describe('what "audited" covers for the pinned @noble/curves', () => {
+  it('pins a version later than the latest audit', () => {
+    expect(pkg.dependencies['@noble/curves']).toBe('^2.4.0');
+    expect(readme).toContain('The library has been audited');
+    expect(readme).toMatch(/at version 2\.3\.0, in Aug 2026, by \[Trail of Bits\]/);
+    expect(readme).not.toMatch(/at version 2\.4\.\d+, in [A-Z]/);
+  });
+
+  it('states that version where the library is described', () => {
+    const source = primitivesSource;
+    expect(source).not.toContain('the audited `@noble/curves`');
+    expect(source).toContain('at version 2.3.0, in Aug');
+    expect(source).toContain('this lab pins ^2.4.0');
   });
 });
