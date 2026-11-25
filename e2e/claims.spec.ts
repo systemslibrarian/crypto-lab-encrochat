@@ -162,6 +162,23 @@ test("the wire's byte counters are internally consistent and match the plaintext
   }
 });
 
+test("custom messages preserve surrounding spaces while whitespace-only input is refused", async ({
+  page,
+}) => {
+  await boot(page);
+
+  await sendCustom(page, "  exact bytes  ");
+  await expect(page.locator(".bubble .text")).toHaveText("  exact bytes  ");
+  const wire = await readWire(page);
+  expect(wire.bodyBytes).toBe(Buffer.byteLength("  exact bytes  ", "utf8"));
+
+  const before = await bubbleCount(page);
+  await page.fill("#custom-msg", "   ");
+  await page.getByRole("button", { name: /encrypt & send/i }).click();
+  await settle(page);
+  expect(await bubbleCount(page)).toBe(before);
+});
+
 test("the wire is opaque: plaintext never appears in the packet, and a repeated message never repeats its ciphertext", async ({
   page,
 }) => {

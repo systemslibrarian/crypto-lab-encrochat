@@ -540,8 +540,11 @@ function sendScripted(): Promise<void> {
 
 function sendCustom(): Promise<void> {
   return runOp(async () => {
-    const text = customInput.value.trim();
-    if (!text) return;
+    const text = customInput.value;
+    // Refuse an input that is only whitespace, but encrypt every byte the
+    // student actually entered. Trimming here would make the conversation and
+    // wire counters describe a different message from the one submitted.
+    if (!text.trim()) return;
     const event = await session.send("alice", text);
     customInput.value = "";
     appendEvent(event);
